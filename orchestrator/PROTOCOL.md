@@ -29,6 +29,14 @@ Global: `~/.claude/orchestrator/state/quota.log` — spoke quota ledger.
 - `/research <topic>` (agy) — any external fact you're not certain of. Never guess versions/APIs.
 
 ## Quota guard (run BEFORE firing any spoke or wave)
+**Primary reading (real, token-based):** `~/.claude/orchestrator/state/glm-usage.sh` prints the
+account's live 5h token-window % and weekly % (via the official glm-plan-usage plugin script;
+also available interactively as `/glm-plan-usage:usage-query`). The plan meters TOKENS, not
+"prompts" — verified 2026-07-11: ~14 headless spoke runs = 58% of the 5h window (spokes inherit
+the full global ~/.claude config per API call, so per-run cost is heavy). Thresholds: ≥90% →
+STOP (no new spokes until reset); ≥70% → prefer glm-4.7, halve waves.
+**Fallback (estimate):** if glm-usage.sh fails, use the ledger math below — but treat its
+weighted units as optimistic by ~2-3×.
 All numbers live in `~/.claude/orchestrator/state/quota-rules.sh` — never hardcode them.
 ```bash
 source ~/.claude/orchestrator/state/quota-rules.sh
