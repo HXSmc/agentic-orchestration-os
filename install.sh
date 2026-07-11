@@ -19,3 +19,9 @@ else
 fi
 
 echo "Installed. Manual steps remaining (see README): api_key, settings.json Stop hook, GNU timeout."
+
+# Slim spoke config dir (see README)
+mkdir -p ~/.claude-spoke
+cp spoke-config/CLAUDE.md ~/.claude-spoke/CLAUDE.md
+cp spoke-config/settings.json ~/.claude-spoke/settings.json
+echo "spoke config installed to ~/.claude-spoke"

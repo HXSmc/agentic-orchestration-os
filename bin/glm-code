@@ -18,4 +18,8 @@ unset ANTHROPIC_API_KEY
 # Mark this process a spoke: loop-guard Stop hook must not fire inside spokes
 # (they share cwd with the hub loop and would delete the hub's loop.lock).
 export ORCHESTRATOR_SPOKE=1
+# Slim config: spokes must NOT inherit the full ~/.claude (plugins, skills,
+# caveman/instinct hooks) — that inheritance measured ~670K tokens per trivial
+# spoke. Minimal dir = spoke rules + rtk hook only.
+export CLAUDE_CONFIG_DIR="$HOME/.claude-spoke"
 exec claude "$@"

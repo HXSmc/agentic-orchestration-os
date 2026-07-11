@@ -55,3 +55,10 @@ All three LLM surfaces carry the operator's core rules (evidence-first, simplici
 | Claude hub | operator's own `~/.claude/CLAUDE.md` | (already there) |
 | GLM spokes | `orchestrator/SPOKE-MODE.md` | appended as a section to `~/.claude/CLAUDE.md` (guarded by `ORCHESTRATOR_SPOKE=1` wording; spokes inherit the file) |
 | Gemini / Antigravity (agy) | `GEMINI.md` | `~/.gemini/GEMINI.md` |
+
+## Slim spoke config (added 2026-07-11)
+
+Spokes run with `CLAUDE_CONFIG_DIR=~/.claude-spoke` (exported by the launcher) so they DON'T inherit
+the operator's full `~/.claude` (plugins, skills, caveman/instinct hooks) — that inheritance measured
+~670K tokens per trivial spoke on a token-metered plan. `spoke-config/` holds the minimal dir contents
+(spoke rules + rtk hook only); install.sh copies it to `~/.claude-spoke`.
