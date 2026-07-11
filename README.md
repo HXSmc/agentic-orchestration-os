@@ -45,3 +45,13 @@ Then:
 
 `~/.claude/orchestrator/state/quota.log` (machine-local, NOT in this repo): one line per spoke,
 `<unix-ts> <weight>`. Weights come from quota-rules.sh (glm-5.2 peak 3× / off-peak 2×, glm-4.7 1×).
+
+## Multi-surface rules (added 2026-07-11)
+
+All three LLM surfaces carry the operator's core rules (evidence-first, simplicity, verify-via-web, secrets hygiene, fail-loudly on limits):
+
+| Surface | Rules file | Installs to |
+|---|---|---|
+| Claude hub | operator's own `~/.claude/CLAUDE.md` | (already there) |
+| GLM spokes | `orchestrator/SPOKE-MODE.md` | appended as a section to `~/.claude/CLAUDE.md` (guarded by `ORCHESTRATOR_SPOKE=1` wording; spokes inherit the file) |
+| Gemini / Antigravity (agy) | `GEMINI.md` | `~/.gemini/GEMINI.md` |
