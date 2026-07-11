@@ -32,7 +32,7 @@ Global: `~/.claude/orchestrator/state/quota.log` — spoke quota ledger.
 All numbers live in `~/.claude/orchestrator/state/quota-rules.sh` — never hardcode them.
 ```bash
 source ~/.claude/orchestrator/state/quota-rules.sh
-[ "$(date +%Y-%m-%d)" \> "$VERIFIED_UNTIL" ] && echo "⚠ quota rules EXPIRED ($VERIFIED_UNTIL) — /research current GLM plan pricing/multipliers, update quota-rules.sh, bump VERIFIED_UNTIL"
+[ "$(date +%Y%m%d)" -gt "$(echo "$VERIFIED_UNTIL" | tr -d -)" ] && echo "⚠ quota rules EXPIRED ($VERIFIED_UNTIL) — /research current GLM plan pricing/multipliers, update quota-rules.sh, bump VERIFIED_UNTIL"
 h=$(date -u +%H)
 if [ "$h" -ge "$PEAK_START_UTC" ] && [ "$h" -le "$PEAK_END_UTC" ]; then W52=$W_52_PEAK; else W52=$W_52_OFF; fi
 now=$(date +%s); cutoff=$((now - 18000))
