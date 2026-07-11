@@ -1,0 +1,61 @@
+#!/bin/bash
+# glm-vision — offload a VISUAL task to GLM-4.6V (vision) instead of burning
+# Claude/chrome-devtools usage. Sends image(s) + a prompt to Z.ai's
+# Anthropic-compatible endpoint and prints the model's text answer.
+#
+# Usage:
+#   glm-vision "<prompt>" <image1> [image2 ...]
+# Example:
+#   glm-vision "Does this screenshot match a dark ops-dashboard design? List issues." shot.png
+#
+# Verified 2026-07-12: Z.ai's /api/anthropic/v1/messages accepts base64 image
+# blocks with model glm-4.6v and returns a real visual answer (not path-guessing).
+set -u
+KEY_FILE="$HOME/.config/zai/api_key"
+[ -r "$KEY_FILE" ] || { echo "glm-vision: missing $KEY_FILE" >&2; exit 78; }
+[ "$#" -ge 2 ] || { echo "usage: glm-vision \"<prompt>\" <image> [image ...]" >&2; exit 64; }
+
+PROMPT="$1"; shift
+MODEL="${GLM_VISION_MODEL:-glm-4.6v}"
+KEY="$(cat "$KEY_FILE")"
+
+# Build the Anthropic content array (images first, then the text prompt) as JSON.
+CONTENT=$(python3 - "$PROMPT" "$@" <<'PY'
+import sys, json, base64, mimetypes, os
+prompt = sys.argv[1]
+blocks = []
+for p in sys.argv[2:]:
+    if not os.path.isfile(p):
+        sys.stderr.write(f"glm-vision: no such image: {p}\n"); sys.exit(66)
+    mt = mimetypes.guess_type(p)[0] or "image/png"
+    with open(p, "rb") as f:
+        blocks.append({"type":"image","source":{"type":"base64","media_type":mt,
+                       "data": base64.b64encode(f.read()).decode()}})
+blocks.append({"type":"text","text":prompt})
+print(json.dumps(blocks))
+PY
+) || exit $?
+
+BODY=$(python3 - "$MODEL" "$CONTENT" <<'PY'
+import sys, json
+model, content = sys.argv[1], json.loads(sys.argv[2])
+print(json.dumps({"model":model,"max_tokens":1500,
+                  "messages":[{"role":"user","content":content}]}))
+PY
+)
+
+RESP=$(curl -s --max-time 120 https://api.z.ai/api/anthropic/v1/messages \
+  -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
+  -d "$BODY") || { echo "glm-vision: request failed" >&2; exit 1; }
+
+echo "$RESP" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.stderr.write("glm-vision: bad response\n"); sys.exit(1)
+if d.get("type") == "error" or "error" in d:
+    sys.stderr.write("glm-vision error: " + json.dumps(d.get("error", d))[:300] + "\n"); sys.exit(1)
+parts = [b.get("text","") for b in d.get("content",[]) if b.get("type")=="text"]
+print("".join(parts).strip())
+'

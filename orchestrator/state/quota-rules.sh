@@ -11,3 +11,4 @@ QUOTA_SHARE=80         # this machine's share of the ACCOUNT-wide cap. Set 40 on
                        # machines when Mac + Windows PC orchestrate in the same window
                        # (the ledger below is per-machine; the plan quota is not).
 VERIFIED_UNTIL=2026-09-30   # promo/pricing horizon — re-verify rules after this date
+W_46V=2                # glm-4.6v vision weight (treat like glm-5.2 standard tier)

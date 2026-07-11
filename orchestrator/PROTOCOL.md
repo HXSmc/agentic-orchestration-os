@@ -161,3 +161,12 @@ Reactive limit-catchers can't be acceptance-tested without actually hitting a
 limit — on the FIRST real limit event of each surface, verify the catcher worked
 and record the observed error text in progress.txt (and update LIMIT_PATTERNS
 here if the real string wasn't matched).
+
+## Visual offload → glm-vision (GLM-4.6V) — save Claude/chrome-devtools usage
+For any VISUAL task (screenshot QA, does-this-match-the-design, read a chart/diagram,
+compare before/after images), prefer `glm-vision "<prompt>" <image...>` over spending
+Claude tokens or driving chrome-devtools yourself. It sends the image(s) + prompt to
+GLM-4.6V on Z.ai's Anthropic endpoint and prints the text answer. Verified 2026-07-12
+(correctly read theme accent colors from a real dashboard screenshot). Costs 1 GLM
+prompt (weight W_46V). Use the hub's own eyes only when the visual judgment is
+architecture/brand-critical or glm-vision's answer is uncertain.
