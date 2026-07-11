@@ -1,0 +1,21 @@
+#!/bin/bash
+# glm-code — Claude Code pointed at Z.ai's Anthropic-compatible endpoint.
+# Spoke runner for the hub-spoke orchestrator. GLM_MODEL=glm-4.7 for the cheap tier.
+set -u
+KEY_FILE="$HOME/.config/zai/api_key"
+[ -r "$KEY_FILE" ] || { echo "glm-code: missing $KEY_FILE" >&2; exit 78; }
+MODEL="${GLM_MODEL:-glm-5.2}"
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+export ANTHROPIC_AUTH_TOKEN="$(cat "$KEY_FILE")"
+# Hub settings.json pins model "fable" — spokes inherit it and Z.ai rejects it.
+# ANTHROPIC_MODEL overrides settings so the spoke actually runs on GLM:
+export ANTHROPIC_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7"
+# Don't inherit the hub's key if set:
+unset ANTHROPIC_API_KEY
+# Mark this process a spoke: loop-guard Stop hook must not fire inside spokes
+# (they share cwd with the hub loop and would delete the hub's loop.lock).
+export ORCHESTRATOR_SPOKE=1
+exec claude "$@"
