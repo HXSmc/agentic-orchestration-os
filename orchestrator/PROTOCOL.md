@@ -165,8 +165,9 @@ here if the real string wasn't matched).
 ## Visual offload → glm-vision (GLM-4.6V) — save Claude/chrome-devtools usage
 For any VISUAL task (screenshot QA, does-this-match-the-design, read a chart/diagram,
 compare before/after images), prefer `glm-vision "<prompt>" <image...>` over spending
-Claude tokens or driving chrome-devtools yourself. It sends the image(s) + prompt to
-GLM-4.6V on Z.ai's Anthropic endpoint and prints the text answer. Verified 2026-07-12
-(correctly read theme accent colors from a real dashboard screenshot). Costs 1 GLM
+Claude tokens or driving chrome-devtools yourself. It sends the image(s) + prompt to GLM-4.6V via Z.ai's CODING endpoint
+(/api/coding/paas/v4, OpenAI image_url format) and prints the text answer. Verified 2026-07-12 by adversarial review: real vision works ONLY via the coding
+endpoint + OpenAI image_url (the Anthropic endpoint accepts glm-4.6v but ignores the image →
+always 'blue'). Discriminator: solid RED→'red', GREEN→'green'; HUD screenshot→'orange and teal'. Costs 1 GLM
 prompt (weight W_46V). Use the hub's own eyes only when the visual judgment is
 architecture/brand-critical or glm-vision's answer is uncertain.
