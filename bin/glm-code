@@ -7,8 +7,9 @@ KEY_FILE="$HOME/.config/zai/api_key"
 MODEL="${GLM_MODEL:-glm-5.2}"
 export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 export ANTHROPIC_AUTH_TOKEN="$(cat "$KEY_FILE")"
-# Hub settings.json pins model "fable" — spokes inherit it and Z.ai rejects it.
-# ANTHROPIC_MODEL overrides settings so the spoke actually runs on GLM:
+# The hub runs on a Claude model alias (fable / opus / sonnet / …) which spokes
+# would otherwise inherit — and Z.ai rejects it (400 Unknown Model). Force the
+# GLM model regardless of which Claude model the hub uses:
 export ANTHROPIC_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
