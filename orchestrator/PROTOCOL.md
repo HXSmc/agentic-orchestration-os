@@ -29,9 +29,20 @@ Global: `~/.claude/orchestrator/state/quota.log` — spoke quota ledger.
 - `/research <topic>` (agy) — any external fact you're not certain of. Never guess versions/APIs.
 
 ## Quota guard (run BEFORE firing any spoke or wave)
-**Primary reading (real, token-based):** `~/.claude/orchestrator/state/glm-usage.sh` prints the
-account's live 5h token-window % and weekly % (via the official glm-plan-usage plugin script;
-also available interactively as `/glm-plan-usage:usage-query`). The plan meters TOKENS, not
+**Primary reading (real, token-based):** `~/.claude/orchestrator/state/glm-usage.sh` prints
+`GLM 5h: N% | weekly: M%` (via the official glm-plan-usage plugin script; also available
+interactively as `/glm-plan-usage:usage-query`). **Gate on the 5h number, not weekly** - weekly
+only resets every 7 days and is not what blocks firing a spoke right now.
+**Corrected 2026-07-14, verified against the real z.ai dashboard:** the raw API response returns
+TWO entries both mislabeled by Z.ai's own API as type "Token usage(5 Hour)" - one is genuinely
+5h, the other is genuinely weekly (confirmed: dashboard showed 5h=6%, weekly=75% at a moment this
+script also read 6%/75% in that same array order). The script now trusts array POSITION
+(first=5h, second=weekly) since no other distinguishing field exists - this is still a
+reverse-engineered assumption per `Brain/Research/track-zai-glm-coding-plan-usage-quota.md`, so
+if a reading looks implausible (e.g. 5h suddenly far exceeds weekly), re-verify against the
+dashboard rather than trusting it blindly. **A prior fix on 2026-07-13 was itself wrong** - it
+correctly stopped inventing a label but concluded both entries were 5h buckets, when they're
+actually 5h+weekly; don't repeat that specific mistake. The plan meters TOKENS, not
 "prompts" — verified 2026-07-11: ~14 headless spoke runs = 58% of the 5h window (spokes inherit
 the full global ~/.claude config per API call, so per-run cost is heavy). Thresholds: ≥90% →
 STOP (no new spokes until reset); ≥70% → prefer glm-4.7, halve waves.
@@ -57,13 +68,16 @@ echo "$(date +%s) <weight>" >> ~/.claude/orchestrator/state/quota.log
 ```
 
 ## Harness preflight (once per session, before the first spoke)
-Claude Code auto-updates; flags can drift. Verify the ones spokes depend on still exist:
+Run the single bundled check instead of re-deriving it by hand:
 ```bash
-claude --help 2>&1 | grep -q -- '--dangerously-skip-permissions' && \
-claude --help 2>&1 | grep -q -- '--permission-mode' && \
-claude --help 2>&1 | grep -q -- '-p' && echo "preflight OK" || echo "PREFLIGHT FAILED"
+~/.claude/orchestrator/state/doctor.sh
 ```
-FAILED → STOP. Do not guess replacement flags; check `claude --help` / release notes, update this PROTOCOL and the launcher, then continue.
+Covers: Claude Code CLI flags (`--dangerously-skip-permissions`, `--permission-mode`, `-p` —
+Claude Code auto-updates and these can drift), `glm-code`/`agy` on PATH, GLM API key present,
+a live `glm-usage.sh` read, `quota-rules.sh` expiry, `quota.log` writable. Exit 0 = clear to
+fire spokes. FAILED → STOP, read which check failed, fix it (don't guess replacement flags —
+check `claude --help` / release notes, update this PROTOCOL and the launcher), re-run before
+continuing.
 
 ## Spec file contract (write with the Write tool — never inline prompts in bash)
 ```markdown
@@ -83,6 +97,11 @@ FAILED → STOP. Do not guess replacement flags; check `claude --help` / release
 2. Write `.orchestrator/reports/<task-id>.md`: status (done|blocked), files changed,
    commands run with real output snippets, criteria checklist (each ✅/❌), blockers.
    If blocked, STILL write the report. Your final message = one-line status only.
+3. **No silent gaps.** If any tool output, diff, or file you needed to check was
+   truncated/shortened, do NOT claim the criteria it covers as ✅. Mark it explicitly
+   in the report as `⚠ UNREVIEWED: <what was cut, why>` and either re-run narrower
+   commands to cover it or leave it as a named blocker. A criterion with an unreviewed
+   gap under it is FAILED, not passed on faith.
 ```
 
 ## Firing a spoke (from the target repo's root)
@@ -110,6 +129,8 @@ git add -A && git stash push -m "pre-wave checkpoint" && git stash apply
    with a bigger Budget; no progress → revert its files, refire once with a tighter, smaller spec.
 1. Read `.orchestrator/reports/<task-id>.md`. Missing/empty report = task FAILED (spoke died/timed out — check the log tail).
 2. `git diff --stat` then review the diff of touched files against the criteria. Spot-check claims — spokes' "✅" is a claim, not evidence.
+   Any `⚠ UNREVIEWED` line in the report = treat that criterion as unverified, not passed —
+   go read the cut region yourself before accepting it.
 3. Verdict per task: ACCEPT / FIX (write a fix spec citing exact failures, refire) / REJECT (revert its files).
 
 ## Verification doctrine (from WORKFLOW.md, same as OMC's evidence-first)
@@ -154,8 +175,16 @@ insufficient | balance | limit reached | try again later | RESOURCE_EXHAUSTED`
    `pkill -f "specs/$TID.md"`, mark the task STALLED in progress.txt, refire ONCE
    with the same spec plus the line "previous attempt stalled — check git diff
    for partial work before redoing anything". Second stall → task FAILED, report.
-3. **agy:** always invoke with `--print-timeout 10m0s` (as /research does).
-   One timeout → one retry; second → treat as failed/fallback, never loop on it.
+3. **agy:** invoke as `agy --dangerously-skip-permissions --print "<prompt>"` — flag ORDER is
+   load-bearing (agy 1.1.3): `--dangerously-skip-permissions` must come BEFORE `--print`, or agy
+   silently dies with "no output produced... permission that headless mode cannot prompt for" on
+   any internal tool call (`read_file`, `command`, etc.) — confirmed 2026-07-16 twice. No
+   `--print-timeout` flag (confirmed broken 2026-07-16: corrupts the prompt into the literal
+   string `--print-timeout`, and the `=`-form variant caused agy to go agentic and edit unrelated
+   files; see /research's Step 2 note). Default 5m0s timeout applies. One timeout → one retry;
+   second → treat as failed/fallback, never loop on it. `--dangerously-skip-permissions` still
+   passes through the safety classifier live per invocation — this is only the documented
+   default, not a standing pre-authorization.
 
 Reactive limit-catchers can't be acceptance-tested without actually hitting a
 limit — on the FIRST real limit event of each surface, verify the catcher worked

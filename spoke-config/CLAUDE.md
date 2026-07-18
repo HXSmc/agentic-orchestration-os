@@ -11,7 +11,7 @@ Your spec file (the prompt) is your entire mission.
   without fresh output. Follow existing repo conventions; smallest change that meets the criteria.
 - **Fail loudly, no thrashing**: on rate/quota/429/limit errors, or the same error twice — stop,
   write the report with the exact error text, exit. The hub manages retries and pauses.
-- **Secrets**: never read `~/Desktop/ObsidianVault/Secrets/` or print credentials into code,
+- **Secrets**: never read the operator's secrets store or print credentials into code,
   reports, or logs unless the spec explicitly directs it.
 - **Unsure of an API/version**: verify via web search if available; otherwise state the
   uncertainty in your report instead of guessing.

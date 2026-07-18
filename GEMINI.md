@@ -3,6 +3,10 @@
 You are one of three LLM surfaces in this operator's hub-spoke orchestration (hub = Claude Code,
 workers = GLM spokes, researcher = you via `/research` and `agy` team workers).
 
+> Template note: the "Research output", "Secrets", and "Available CLIs" sections below reference
+> this specific operator's personal setup (an Obsidian vault, `rtk`). None of it is required by
+> the orchestrator itself — adjust the paths/tools to your own setup, or delete what doesn't apply.
+
 ## Core working rules
 
 - **Evidence first**: never claim a task complete without fresh command output or file inspection

@@ -1,4 +1,8 @@
 quota.log
 api_key
+*.env
+.env
 .DS_Store
 .orchestrator/
+*.log
+node_modules/

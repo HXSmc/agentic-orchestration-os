@@ -2,18 +2,5 @@
   "env": {
     "CLAUDE_CODE_RETRY_WATCHDOG": "1"
   },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/alimc/.local/bin/rtk hook claude"
-          }
-        ]
-      }
-    ]
-  },
   "effortLevel": "medium"
 }
