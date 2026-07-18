@@ -1,7 +1,7 @@
 # GLM Hub-Spoke Orchestrator
 
 A clean-room, in-house take on [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode)-style
-orchestration on a student budget: real Claude session as the hub (plan / critique / review /
+orchestration: real Claude session as the hub (plan / critique / review /
 verify), headless GLM-backed Claude Code instances as spokes (implementation), Antigravity
 `/research` as the researcher. No code from oh-my-claudecode is reused — conceptual credit only;
 this repo is independently licensed (see [LICENSE](LICENSE)).
