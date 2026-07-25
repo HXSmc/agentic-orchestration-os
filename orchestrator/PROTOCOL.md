@@ -16,7 +16,7 @@ Global: `~/.claude/orchestrator/state/quota.log` — spoke quota ledger.
 Every loop (autopilot, team, ultrawork, ralph, ad-hoc) runs this cycle. Command-specific stage
 names map onto it; they must not skip or reorder these five steps.
 
-1. **Architect (hub, Opus)** — turn the prompt/defect-list into a plan: task breakdown, spec per
+1. **Architect (hub, Fable)** — turn the prompt/defect-list into a plan: task breakdown, spec per
    task, which agent type/tier per task (glm-5.2 / glm-4.7 / agy / Agent-tool claude worker), and
    which existing skill(s)/plugin(s) each spoke should invoke. "Choosing" means selecting from
    what's installed — the architect does not edit global `~/.claude/agents/*.md` or plugin config
@@ -92,7 +92,9 @@ still genuinely unexercised:**
 ## Default role assignment (BINDING — deviation needs a stated reason in the report)
 - **Research → agy** (`/research`): ANY external fact — web, docs, APIs, versions, pricing —
   goes to agy first. The hub does NOT web-search itself; hub subagents research only as
-  agy's fallback (which /research handles internally).
+  agy's fallback (which /research handles internally). Direct one-shot agy calls prepend the
+  saved persona `~/.claude/orchestrator/agents/agy/researcher.md` (citation discipline,
+  /watch for video sources, flag-order/timeout traps in its Hub usage notes).
 - **Manager/architect → Claude Code hub**: planning, decomposition, critique, review,
   integration, verification gates, security judgment. The hub does NOT write volume code.
 - **Worker → GLM spokes**: all implementation by default. Hub-written code and Agent-tool
@@ -116,6 +118,21 @@ section (excluded from the hub-only tally). Expires automatically at test end.
 - `glm-4.7` spoke — trivial/mechanical: renames, boilerplate, docs, simple lookups. Always 1× quota.
 - `glm-5.2` spoke (default worker) — standard implementation, tests, debugging.
 - HUB itself / Agent-tool subagents — judgment: architecture, tricky debugging, review, security.
+  Model tiering for Agent-tool subagents (price/perf, set 2026-07-25): read-only locate/explore →
+  `haiku`; edits, standard review, verify → `sonnet` (near-Opus review quality at $3/$15, the
+  price/perf sweet spot); security-lens review or the hardest debugging judgment → `opus`;
+  `fable` is the hub only — never assign it to a worker subagent.
+  **Named role agents (`~/.claude/agents/`, created 2026-07-25 — prefer these over ad-hoc
+  general-purpose spawns; each preloads its skill pool via `skills:` frontmatter):**
+  `architect` (opus — decomposition/spec drafting, superpowers planning skills),
+  `spec-writer` (sonnet low-effort — mechanical spec files to the contract),
+  `code-reviewer` (sonnet — per-spoke diff review, ponytail+coding-standards),
+  `security-reviewer` (opus — security lens, security-review+scan skills),
+  `design-reviewer` (sonnet — UI taste lens, taste-skill+redesign audit),
+  `verifier` (sonnet — evidence-first gate runner),
+  `fixer` (sonnet — judgment-critical fixes, systematic-debugging+ponytail).
+  Micro-tasks still go to cavecrew (investigator haiku / builder sonnet / reviewer sonnet)
+  for compressed output.
 - `/research <topic>` (agy) — any external fact you're not certain of. Never guess versions/APIs.
 
 ## Quota guard (run BEFORE firing any spoke or wave)
@@ -195,13 +212,34 @@ continuing.
 ```
 
 ## Firing a spoke (from the target repo's root)
+**Persona first (2026-07-25):** the spec body = saved persona + task. Prepend
+`~/.claude/orchestrator/agents/spokes/glm-implementer.md` (glm-5.2 tasks) or
+`spokes/glm-mechanic.md` (glm-4.7 tasks) — the "Persona instructions" section verbatim —
+above the task-specific contract. Full consumption rules + agent list:
+`~/.claude/orchestrator/agents/README.md`. Ad-hoc personas worth reusing get SAVED there,
+not left inline.
 ```bash
 TID="t$(date +%s)$RANDOM"   # generate BEFORE writing the spec, use in both places
-MINS=20                      # match the spec's "## Budget" line (20 default, ≤45)
+MINS=20                      # match the spec's "## Budget" line (20 default, ≤45 for pure code work)
 timeout ${MINS}m glm-code -p "$(cat .orchestrator/specs/$TID.md)" \
   --permission-mode acceptEdits --dangerously-skip-permissions \
   > .orchestrator/logs/$TID.log 2>&1
 ```
+**Budget must scale up when the task makes real external API calls (live third-party SDK/API
+debugging, web search, etc.), not just local code/build work — confirmed root cause 2026-07-23
+(gemini-trial spoke, taweed).** A spoke doing live-API bisection (probing models, retrying past
+429s) can genuinely need 40-60+ min; local edits/typecheck/lint rarely need more than the 20-45
+default. Guess conservatively high for anything with a live external call in the loop — the
+failure mode when you guess too low is silent and easy to misdiagnose (see next paragraph).
+
+**"Execution error" in the spoke's log is very often just a timeout kill, not a crash.** `timeout`
+sends SIGTERM when the budget expires; the Claude Code SDK's own transcript logs that as
+`[Request interrupted by user]`, and the calling shell just sees a truncated/empty log plus a
+nonzero exit — indistinguishable at a glance from glm-code/Z.ai actually being broken. Before
+concluding the tool itself is broken, tail the spoke's own session transcript
+(`~/.claude-spoke/projects/<project-path-with-slashes-as-dashes>/<sessionId>.jsonl` — the newest
+file(s) by mtime) and grep for `[Request interrupted by user]`. If found: the spec's `MINS` was too
+low, not a real bug — refire with a bigger budget instead of treating it as a flaky-tool retry.
 - Parallel wave: same command via Bash run_in_background, one call per task. Max 4 concurrent.
 - **NEVER add a trailing `&` to the command when also passing `run_in_background: true` to the
   Bash tool.** That double-backgrounds it: the Bash tool's own wrapper forks the child and returns
@@ -308,7 +346,9 @@ here if the real string wasn't matched).
 ## Visual offload → glm-vision (GLM-4.6V) — save Claude/chrome-devtools usage
 For any VISUAL task (screenshot QA, does-this-match-the-design, read a chart/diagram,
 compare before/after images), prefer `glm-vision "<prompt>" <image...>` over spending
-Claude tokens or driving chrome-devtools yourself. It sends the image(s) + prompt to GLM-4.6V via Z.ai's CODING endpoint
+Claude tokens or driving chrome-devtools yourself. Use the saved prompt template
+`~/.claude/orchestrator/agents/spokes/glm-visual-qa.md` (PASS/FAIL per criterion +
+unprompted-defect sweep) instead of ad-hoc prompts. It sends the image(s) + prompt to GLM-4.6V via Z.ai's CODING endpoint
 (/api/coding/paas/v4, OpenAI image_url format) and prints the text answer. Verified 2026-07-12 by adversarial review: real vision works ONLY via the coding
 endpoint + OpenAI image_url (the Anthropic endpoint accepts glm-4.6v but ignores the image →
 always 'blue'). Discriminator: solid RED→'red', GREEN→'green'; HUD screenshot→'orange and teal'. Costs 1 GLM

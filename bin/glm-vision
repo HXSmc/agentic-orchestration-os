@@ -41,6 +41,10 @@ RESP=$(curl -s --max-time 120 https://api.z.ai/api/coding/paas/v4/chat/completio
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d "$BODY") || { echo "glm-vision: request failed" >&2; exit 1; }
 
+# Log the GLM call to the quota ledger (glm-4.6v ~= standard tier, weight 2).
+LEDGER="$HOME/.claude/orchestrator/state/quota.log"
+[ -w "$(dirname "$LEDGER")" ] && echo "$(date +%s) 2" >> "$LEDGER" 2>/dev/null || true
+
 echo "$RESP" | python3 -c '
 import sys, json
 try:

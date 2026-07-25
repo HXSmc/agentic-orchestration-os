@@ -31,7 +31,7 @@ OUT=$(ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
       ANTHROPIC_AUTH_TOKEN="$(cat "$KEY_FILE")" \
       timeout 60 node "$SCRIPT" 2>&1) || { echo "glm-usage: query failed: $(echo "$OUT" | head -2)" >&2; exit 1; }
 echo "$OUT" | python3 -c '
-import sys, json, re
+import sys, json, re, os, time
 raw = sys.stdin.read()
 m = re.search(r"Quota limit data:\s*\n\s*(\{.*\})", raw)
 if not m:
@@ -40,10 +40,35 @@ limits = json.loads(m.group(1)).get("limits", [])
 token_buckets = [l.get("percentage", 0) for l in limits if "Token usage" in l.get("type", "")]
 if not token_buckets:
     sys.stderr.write("glm-usage: no Token usage buckets in response\n"); sys.exit(1)
-if len(token_buckets) == 1:
-    # Only one bucket returned - report it as 5h, weekly unknown rather than guessing.
-    print(f"GLM 5h: {token_buckets[0]}% | weekly: unknown (only 1 bucket returned)")
+
+five_h = token_buckets[0]
+weekly = token_buckets[1] if len(token_buckets) > 1 else None
+
+# Piggyback on every real invocation (hub already calls this before each GLM
+# wave per OPUSPLAN.md) to log a durable reading — no separate manual
+# sampling step, same "log on natural use" pattern as the Claude statusline
+# append. Throttled >=60s apart so a burst of waves does not spam the file.
+try:
+    hist = os.path.expanduser("~/.claude/orchestrator/state/glm-usage-history.ndjson")
+    last_ts = 0
+    if os.path.exists(hist):
+        with open(hist, "rb") as f:
+            try:
+                f.seek(-200, os.SEEK_END)
+            except OSError:
+                f.seek(0)
+            lines = f.read().decode(errors="ignore").strip().splitlines()
+            if lines:
+                last_ts = json.loads(lines[-1]).get("ts", 0)
+    now = int(time.time())
+    if now - last_ts >= 60:
+        with open(hist, "a") as f:
+            f.write(json.dumps({"ts": now, "fiveH": five_h, "weekly": weekly}) + "\n")
+except Exception:
+    pass
+
+if weekly is None:
+    print(f"GLM 5h: {five_h}% | weekly: unknown (only 1 bucket returned)")
 else:
-    five_h, weekly = token_buckets[0], token_buckets[1]
     print(f"GLM 5h: {five_h}% | weekly: {weekly}%")
 ' || exit 1

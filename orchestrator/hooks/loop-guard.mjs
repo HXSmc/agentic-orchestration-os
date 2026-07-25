@@ -9,6 +9,27 @@ import { join } from "node:path";
 // a blocked spoke would otherwise delete the hub's lock to free itself.
 if (process.env.ORCHESTRATOR_SPOKE === "1") process.exit(0);
 
+// loop.lock is file-existence-based with NO session scoping — any Claude Code
+// session whose cwd is this repo gets blocked by ANY active loop, including
+// one owned by a totally different concurrent session (found live 2026-07-24:
+// two sessions in the same taweed repo, one running /autopilot, the other on
+// unrelated work, both blocked identically). The exempt list below lets a
+// specific session opt OUT of the guard without touching the lock file or
+// affecting the owning session's guard behavior at all — the owning session's
+// CLAUDE_CODE_SESSION_ID is simply never added here, so nothing changes for it.
+const exemptPath = join(process.cwd(), ".orchestrator", "state", "loop-guard-exempt.json");
+if (existsSync(exemptPath)) {
+  try {
+    const exempt = JSON.parse(readFileSync(exemptPath, "utf8"));
+    if (Array.isArray(exempt) && exempt.includes(process.env.CLAUDE_CODE_SESSION_ID)) {
+      process.exit(0);
+    }
+  } catch {
+    // Malformed exempt file must never itself block a legitimate stop —
+    // fail open on parse error, same posture as the stale-lock check below.
+  }
+}
+
 const lock = join(process.cwd(), ".orchestrator", "state", "loop.lock");
 if (!existsSync(lock)) process.exit(0);
 
