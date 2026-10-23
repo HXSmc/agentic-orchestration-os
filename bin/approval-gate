@@ -1,0 +1,3 @@
+#!/bin/bash
+# approval-gate: CLI entry for the approval-gate module (copied from the Mac 2026-10-23).
+exec node "$HOME/.claude/orchestrator/approval/approval-gate.mjs" "$@"

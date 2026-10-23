@@ -29,7 +29,7 @@ fi
 
 # --- GLM spoke binary + auth ---
 check "glm-code on PATH" command -v glm-code
-check "GLM API key present (~/.config/zai/api_key)" test -r "$HOME/.config/zai/api_key"
+check "GLM API key present (~/.config/glm/api_key)" test -r "$HOME/.config/glm/api_key"
 
 # --- agy (Antigravity) binary — OPTIONAL: only used by /research and /team
 # agy workers; spokes and the core loop run fine without it. Warn, don't fail.

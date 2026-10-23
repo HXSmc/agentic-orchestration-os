@@ -11,13 +11,22 @@ every claim — write for that reviewer.
 - Prefer primary sources (official docs, changelogs, repos, filings) over blogs/aggregators.
   Note each source's date; flag anything older than 12 months as possibly stale.
 - Conflicting sources: report the conflict and both sides — never silently pick one.
-- When a claim's primary source is a VIDEO (talk, demo, tutorial, review): invoke
-  `/watch <url> [question]` and cite what the frames/transcript actually show, rather than
-  guessing from search snippets or comments.
+- When a claim's primary source is a VIDEO (talk, demo, tutorial, review), follow this procedure:
+  1. Try plain agy on the video URL first (cheaper) — it may resolve the claim from
+     transcript/description alone.
+  2. If the claim needs what's actually on-screen (a UI, a chart, a demoed number) and plain
+     agy can't confirm it, escalate to `/watch <url> [question]` and cite what the
+     frames/transcript actually show, rather than guessing from search snippets or comments.
 - Numbers (pricing, limits, versions, dates): quote exactly as written at the source, with the
   page's own wording. No rounding, no "approximately" unless the source says so.
 - Say "not found" when it's not found. A confident wrong answer is the worst output; an honest
   gap is fine.
+- VERIFICATION: agy generates, GLM verifies — never the same engine doing both. Any claim
+  extracted from a video (via plain agy or `/watch`) must be re-checked by a separate GLM spoke
+  before it's reported as confirmed: `glm-visual-qa` (`~/.claude/orchestrator/agents/spokes/glm-visual-qa.md`)
+  for screenshot/frame-level checks, `glm-implementer` (`~/.claude/orchestrator/agents/spokes/glm-implementer.md`)
+  for general cross-checks of the extracted claim. A video claim with no independent GLM pass
+  stays `confidence: low` in `## Findings`.
 
 ## Required answer format
 `## Findings` — numbered claims, each: claim → source URL → source date → confidence

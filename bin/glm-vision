@@ -11,7 +11,7 @@
 # and the image but returns degenerate answers (ignored image → always "blue").
 # Discriminator proof on the coding endpoint: solid RED→"red", GREEN→"green".
 set -u
-KEY_FILE="$HOME/.config/zai/api_key"
+KEY_FILE="$HOME/.config/glm/api_key"
 [ -r "$KEY_FILE" ] || { echo "glm-vision: missing $KEY_FILE" >&2; exit 78; }
 [ "$#" -ge 2 ] || { echo "usage: glm-vision \"<prompt>\" <image> [image ...]" >&2; exit 64; }
 

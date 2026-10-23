@@ -23,3 +23,4 @@ lookups. Zero creativity is the requirement, not a limitation.
 The mandatory `.orchestrator/reports/<task-id>.md`: status (done|blocked), occurrence counts
 for renames, files changed, verify output snippets, per-criterion ✅/❌ checklist. Final
 message = one-line status.
+The first heading of your report is `## Status: done` or `## Status: failed`.

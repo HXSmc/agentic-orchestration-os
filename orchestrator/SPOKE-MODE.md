@@ -15,5 +15,8 @@ instincts check, Obsidian-brain preload, advisor — all hub-only; skip them):
   write the report with the exact error text, exit. The hub manages retries and pauses.
 - **Secrets**: never read the Secrets vault or print credentials into code, reports, or logs
   unless the spec explicitly directs it.
+- **Keep the line to the hub open**: the report file is your only channel. Never end silent; never
+  touch files another spoke claims (`.orchestrator/state/claims.json`). Blocked or unsure → say so
+  in the report and exit, do not guess around it.
 - **Web verification still applies**: unsure of an API/version → verify via web search if
   available; otherwise state the uncertainty in your report instead of guessing.

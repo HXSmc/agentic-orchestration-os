@@ -16,6 +16,7 @@ A Stop hook (loop-guard) will refuse to let you end the turn while it exists.
    - `.orchestrator/state/prd.json`: `{"task": "...", "stories": [{"id": "s1", "title": "...", "acceptance": ["...each criterion a runnable check..."], "priority": 1, "passes": false, "attempts": 0}]}`
    - Acceptance criteria MUST be verifiable by command or file inspection — never "works correctly".
    - `.orchestrator/state/progress.txt`: append-only log. Start it with the story list.
+   - Ensure verify skill first (PROTOCOL Standing loop order, step 0).
 2. **Loop** while incomplete stories remain:
    a. Pick highest-priority story with `passes: false` and `attempts < 3`.
    b. Delegate implementation per the ultrawork protocol (steps 2–7 of `/ultrawork`, scoped to this story). Parallelize within the story if it decomposes.
@@ -25,6 +26,6 @@ A Stop hook (loop-guard) will refuse to let you end the turn while it exists.
    - Standard change: review the full diff against prd.json criteria + ask explicitly: "is there a meaningfully simpler approach?" Note the answer.
    - `git diff --stat` >20 files OR security-sensitive (auth/payments/PII/tenant isolation): full multi-lens review instead (spawn parallel reviewer subagents: correctness, security, domain; all must approve; in taweed use its `multi-lens-review` workflow).
    - Rejections → new fix stories, back to step 2.
-4. **Deslop:** run `/simplify` on the changed code. Apply its fixes.
-5. **Regression:** re-run the FULL gate set (typecheck, lint, all tests, build). Red → back to step 2 with a fix story.
+4. **Deslop:** run `/simplify` on the changed code. Apply its fixes. Before /simplify: run the thermo-nuclear pass (PROTOCOL "Final batch: thermo-nuclear pass") and fix its presumptive blockers.
+5. **Regression:** re-run the FULL gate set (typecheck, lint, all tests, build). Red → back to step 2 with a fix story. Then run the verify skill on touched features (PROTOCOL "Loop add-ons").
 6. **Exit report:** stories table (passes/attempts), evidence log location, gate outputs, diff stat. BLOCKED stories reported loudly with their evidence — never silently dropped. Delete state files only if fully complete; keep them for resume otherwise.

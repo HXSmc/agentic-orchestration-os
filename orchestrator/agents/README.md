@@ -6,10 +6,17 @@ skills/plugins it should invoke), SAVE it here instead of leaving it inline in a
 
 ## Layout
 - `counsel/` — the 5-advisor counsel (contrarian, first-principles, expansionist, outsider,
-  executor). Used by the `/counsel` skill. Engine: glm-5.2 spokes; head counsel = Fable hub.
-- `spokes/` — GLM worker personas (2026-07-25): `glm-implementer` (glm-5.2, default volume
+  executor). Used by the `/counsel` skill. Engine: glm-5.3 spokes; head counsel = Fable hub.
+- `spokes/` — GLM worker personas (2026-07-25): `glm-implementer` (glm-5.3, default volume
   coder), `glm-mechanic` (glm-4.7, trivial/mechanical at 1× quota), `glm-visual-qa`
-  (glm-vision CLI prompt template for screenshot QA).
+  (glm-vision CLI prompt template for screenshot QA), `glm-designer` (glm-5.3, 2026-08-04,
+  default UI/frontend building spoke: landing pages, dashboards, components, design systems,
+  token/brand work; carries the user's design rules inline since spokes load no plugins;
+  output goes to the Claude `design-reviewer` agent, never self-signed), `glm-marketer`
+  (glm-4.7, escalate to glm-5.3 for strategy-shaped work, 2026-08-04, marketing content
+  production: copy drafts, ad variants, SEO page bodies, cold-email sequences, social posts;
+  drafts against a brief from the Claude `marketing-strategist` agent, which owns
+  positioning/pricing/KSA compliance judgment, and returns output to it for review).
 - `agy/` — `researcher` (the one agy persona: cited external-fact research, /watch for video
   sources; /research remains the default wrapper for substantive research).
 - `<group>/<agent>.md` — one file per agent, grouped by workflow.
@@ -20,7 +27,7 @@ skills/plugins it should invoke), SAVE it here instead of leaving it inline in a
 ## File format
 ```markdown
 # <Agent display name>
-engine: glm-5.2 | glm-4.7 | agy | claude   ← which surface runs it
+engine: glm-5.3 | glm-4.7 | agy | claude   ← which surface runs it
 tagline: <one line>
 skills: <optional — skills/plugins the agent must invoke, e.g. /watch, ponytail>
 
