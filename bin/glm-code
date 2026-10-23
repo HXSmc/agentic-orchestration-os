@@ -33,10 +33,13 @@ seed_spoke_config_dir() {
   local template="$1" dest="$2"
   rm -rf "$dest"
   if [ -d "$template" ]; then
-    # --reflink=auto asks for a CoW reflink (btrfs/XFS/ZFS): instant, no real
-    # disk duplication of the template. Falls back to a plain recursive copy
-    # on filesystems that don't support reflinks (ext4).
-    cp -R --reflink=auto "$template" "$dest" 2>/dev/null || cp -R "$template" "$dest"
+    # Copy-on-write first, so the template is not really duplicated: macOS
+    # `cp -c` = APFS clonefile, GNU `--reflink=auto` = btrfs/XFS/ZFS reflink.
+    # Each flag is an unknown option on the other OS and fails before copying;
+    # the rm keeps a half-done attempt from nesting the next copy inside $dest.
+    cp -Rc "$template" "$dest" 2>/dev/null ||
+      { rm -rf "$dest"; cp -R --reflink=auto "$template" "$dest" 2>/dev/null; } ||
+      { rm -rf "$dest"; cp -R "$template" "$dest"; }
     rm -rf "$dest/projects" "$dest/sessions" "$dest/session-env" \
            "$dest/shell-snapshots" "$dest/tasks" "$dest/backups"
   else
