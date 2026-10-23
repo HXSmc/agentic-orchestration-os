@@ -90,8 +90,11 @@ The hub routes by task shape, without asking. Full table: `orchestrator/PROTOCOL
 4. **Review.** The hub runs `spoke-wt diff <id>` and checks every criterion itself. A spoke's ✅
    is a claim, not evidence. Routine review goes to a fresh spoke; risky review goes to a Claude
    agent.
-5. **Land or retry.** ACCEPT: `spoke-wt apply <id> && spoke-wt drop <id>`. FIX: fix spec, refire
-   on the same id. REJECT: `spoke-wt drop <id>`.
+5. **Land or retry.** ACCEPT: `spoke-wt apply <id> && spoke-wt drop <id>`. REJECT:
+   `spoke-wt drop <id>`. FIX: write a fix spec and continue in the same worktree. Careful: a plain
+   relaunch with an already-used `GLM_TASK_ID` does NOT re-enter its worktree (the `spoke/<id>`
+   branch exists, so `glm-code` falls back to the main tree). `cd` into the worktree first and
+   launch with `GLM_NO_WORKTREE=1`.
 6. **Gates.** The hub reruns typecheck, lint, tests and build fresh before anything is "done".
 
 Loops (`/autopilot`, `/ralph`, `/team`, `/ultrawork`, `/ultraqa`) repeat this cycle. While a loop
