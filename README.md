@@ -131,12 +131,10 @@ or the safety and secrets rules.
 | `bin/glm-code` | `~/.local/bin/` | Spoke launcher: per-spoke config dir, worktree, file claims, heartbeat, `--selfcheck` |
 | `bin/spoke-wt` | `~/.local/bin/` | Hub helper: `diff` / `apply` / `drop` a spoke's worktree |
 | `bin/glm-vision` | `~/.local/bin/` | Image + prompt → GLM-4.6V answer (screenshot QA, charts) |
-| `bin/approval-gate` | `~/.local/bin/` | CLI for the approval gate |
 | `orchestrator/PROTOCOL.md` | `~/.claude/orchestrator/` | The hub's rulebook: roles, routing, quota guard, spec contract, error catchers, session communication |
 | `orchestrator/claims.py` (+ `claims_test.py`) | `~/.claude/orchestrator/` | File-claim registry used by `glm-code` |
 | `orchestrator/hooks/loop-guard.mjs` | `~/.claude/orchestrator/hooks/` | Stop hook: blocks turn-end while this session's loop runs |
 | `orchestrator/hooks/loop-owner-stamp.mjs` | `~/.claude/orchestrator/hooks/` | PostToolUse hook: stamps the loop lock's owner session |
-| `orchestrator/approval/approval-gate.mjs` | `~/.claude/orchestrator/approval/` | Tiered approval ladder + append-only audit (see `orchestrator/docs/approval-gate.md`) |
 | `orchestrator/state/quota-rules.sh` | `~/.claude/orchestrator/state/` | GLM quota math (weights, peak hours) |
 | `orchestrator/state/glm-usage.sh`, `query-usage.mjs` | `~/.claude/orchestrator/state/` | Live GLM 5h / weekly usage reading |
 | `orchestrator/state/doctor.sh` | `~/.claude/orchestrator/state/` | One-shot preflight |
@@ -279,9 +277,6 @@ These run on the original operator's machines. They are not in this repo.
   devices), `jarvis-card` (status card + questions to the owner's phone), `jarvis-screen` (drive
   another machine's screen). The session-communication rule works without them: `ListAgents` and
   `SendMessage` are built into Claude Code.
-- **Approval gate wiring**: `approval-gate` grades actions into tiers and keeps an audit log. It
-  is installed but not wired into `glm-code` by default. To grade every spoke launch, add the
-  block shown in `orchestrator/docs/approval-gate.md` near the top of `glm-code`. It fails open.
 
 ---
 

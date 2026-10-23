@@ -7,11 +7,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 O=~/.claude/orchestrator
-mkdir -p ~/.local/bin "$O/hooks" "$O/state" "$O/approval" "$O/agents" "$O/templates" \
+mkdir -p ~/.local/bin "$O/hooks" "$O/state" "$O/agents" "$O/templates" \
   ~/.claude/commands ~/.claude/agents/refs ~/.claude/skills
 
 # --- launchers on PATH
-for f in glm-code glm-vision spoke-wt approval-gate; do
+for f in glm-code glm-vision spoke-wt; do
   install -m 755 "bin/$f" ~/.local/bin/"$f"
 done
 
@@ -19,7 +19,6 @@ done
 cp orchestrator/PROTOCOL.md "$O/PROTOCOL.md"
 cp orchestrator/claims.py orchestrator/claims_test.py "$O/"
 cp orchestrator/hooks/loop-guard.mjs orchestrator/hooks/loop-owner-stamp.mjs "$O/hooks/"
-cp orchestrator/approval/approval-gate.mjs "$O/approval/approval-gate.mjs"
 install -m 755 orchestrator/state/doctor.sh "$O/state/doctor.sh"
 install -m 755 orchestrator/state/glm-usage.sh "$O/state/glm-usage.sh"
 cp orchestrator/state/query-usage.mjs "$O/state/query-usage.mjs"
