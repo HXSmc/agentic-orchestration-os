@@ -1,0 +1,123 @@
+#!/bin/bash
+# spoke-wt - hub-side helper for reviewing/applying/dropping a spoke's git-worktree work.
+# Worktrees live at ~/.claude/orchestrator/worktrees/<repo-basename>/<tid>, branch spoke/<tid>.
+# See glm-code (creates them) and PROTOCOL.md ("Firing a spoke") for the full flow.
+set -u
+
+# Pathspecs keeping glm-code's worktree scaffolding out of staging/status.
+# Trailing-slash gitignore patterns (".orchestrator/", "node_modules/") only
+# match directories, not the symlinks glm-code substitutes for them, so these
+# need explicit excludes. node_modules must go at ANY depth: setup_worktree
+# mirrors the symlink into every workspace package dir too (apps/web/,
+# packages/*/, test/*/), not just the top level - and it is the symlink ENTRY
+# itself that would otherwise be staged, hence the bare **/node_modules pattern
+# alongside the contents pattern.
+WT_EXCLUDES=(
+  ':(exclude).orchestrator'
+  ':(exclude)node_modules'
+  ':(exclude,glob)**/node_modules'
+  ':(exclude,glob)**/node_modules/**'
+  ':(exclude).env*'
+)
+
+usage() {
+  echo "usage: spoke-wt <list|diff|apply|drop> [tid]" >&2
+  exit 64
+}
+
+# Resolve a spoke branch's worktree path + its main-repo path from `git worktree
+# list --porcelain` (run from anywhere inside the main repo, or inside the
+# worktree itself - porcelain output always includes every linked worktree).
+resolve_wt() {
+  local tid="$1"
+  git worktree list --porcelain | awk -v target="refs/heads/spoke/$tid" '
+    /^worktree / { wt = substr($0, 10) }
+    /^branch /   { br = substr($0, 8); if (br == target) { print wt; exit } }
+  '
+}
+
+main_root() {
+  git rev-parse --show-toplevel 2>/dev/null
+}
+
+# The MAIN checkout's path, from anywhere (main repo or a linked worktree).
+# Unlike `rev-parse --show-toplevel`, this never returns a linked worktree:
+# porcelain always lists the main worktree first. drop needs this because its
+# cwd may be inside the very worktree it is about to delete.
+main_repo() {
+  git worktree list --porcelain 2>/dev/null | awk '/^worktree / { print substr($0, 10); exit }'
+}
+
+cmd="${1:-}"
+[ -n "$cmd" ] || usage
+
+case "$cmd" in
+  list)
+    root="$(main_root)" || { echo "spoke-wt: not inside a git repo" >&2; exit 1; }
+    git -C "$root" worktree list --porcelain | awk '
+      /^worktree / { wt = substr($0, 10) }
+      /^branch refs\/heads\/spoke\// { br = $0; sub(/^branch refs\/heads\//, "", br) }
+      /^$/ { if (br != "") print wt "\t" br; wt=""; br="" }
+      END { if (br != "") print wt "\t" br }
+    ' | while IFS=$'\t' read -r wt br; do
+      tid="${br#spoke/}"
+      # See WT_EXCLUDES above - without it every untouched worktree reports
+      # dirty=2 (the two scaffolding symlinks), and nested ones report more.
+      dirty="$(git -C "$wt" status --porcelain -- . "${WT_EXCLUDES[@]}" 2>/dev/null | wc -l | tr -d ' ')"
+      echo "tid=$tid path=$wt dirty=$dirty"
+    done
+    ;;
+
+  diff)
+    tid="${2:-}"; [ -n "$tid" ] || usage
+    root="$(main_root)" || { echo "spoke-wt: not inside a git repo" >&2; exit 1; }
+    wt="$(resolve_wt "$tid")"
+    [ -n "$wt" ] && [ -d "$wt" ] || { echo "spoke-wt: no worktree for tid '$tid'" >&2; exit 1; }
+    # See WT_EXCLUDES above - `add -A` would otherwise stage the scaffolding
+    # symlinks/env copies as new files and `apply` would collide with the
+    # real dirs (and leak .env contents into the diff).
+    git -C "$wt" add -A -- . "${WT_EXCLUDES[@]}"
+    git -C "$wt" diff --cached --stat
+    echo "---"
+    git -C "$wt" diff --cached
+    ;;
+
+  apply)
+    tid="${2:-}"; [ -n "$tid" ] || usage
+    root="$(main_root)" || { echo "spoke-wt: not inside a git repo" >&2; exit 1; }
+    wt="$(resolve_wt "$tid")"
+    [ -n "$wt" ] && [ -d "$wt" ] || { echo "spoke-wt: no worktree for tid '$tid'" >&2; exit 1; }
+    # See WT_EXCLUDES above - `add -A` would otherwise stage the scaffolding
+    # symlinks/env copies as new files and `apply` would collide with the
+    # real dirs (and leak .env contents into the diff).
+    git -C "$wt" add -A -- . "${WT_EXCLUDES[@]}"
+    if git -C "$wt" diff --cached --binary | git -C "$root" apply --3way; then
+      echo "spoke-wt: applied spoke/$tid to $root"
+    else
+      echo "spoke-wt: apply FAILED (conflict) - .rej/conflict markers left in $root, worktree NOT dropped" >&2
+      exit 1
+    fi
+    ;;
+
+  drop)
+    tid="${2:-}"; [ -n "$tid" ] || usage
+    wt="$(resolve_wt "$tid")"
+    [ -n "$wt" ] || { echo "spoke-wt: no worktree for tid '$tid'" >&2; exit 1; }
+    # Resolve the main repo BEFORE removing: drop may run with its cwd inside
+    # the worktree being dropped, where `rev-parse --show-toplevel` returns
+    # that worktree - after removal every git call rooted there dies with
+    # "No such file or directory" and spoke/<tid> survives. First porcelain
+    # entry is always the main checkout.
+    main="$(main_repo)"
+    [ -n "$main" ] || { echo "spoke-wt: not inside a git repo" >&2; exit 1; }
+    if ! git -C "$main" worktree remove --force "$wt"; then
+      echo "spoke-wt: worktree remove failed for $wt (tid=$tid), branch NOT deleted" >&2
+      exit 1
+    fi
+    git -C "$main" branch -D "spoke/$tid"
+    ;;
+
+  *)
+    usage
+    ;;
+esac

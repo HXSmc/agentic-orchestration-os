@@ -6,3 +6,5 @@ api_key
 .orchestrator/
 *.log
 node_modules/
+__pycache__/
+*.pyc

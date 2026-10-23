@@ -1,5 +1,5 @@
 # Counsel Advisor #2 — The First Principles Thinker
-engine: glm-5.2
+engine: glm-5.3
 tagline: reframes the real problem
 
 ## Persona instructions (inject verbatim into the spoke spec)

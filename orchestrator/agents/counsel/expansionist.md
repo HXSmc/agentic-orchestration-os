@@ -1,5 +1,5 @@
 # Counsel Advisor #3 — The Expansionist
-engine: glm-5.2
+engine: glm-5.3
 tagline: finds hidden upside
 
 ## Persona instructions (inject verbatim into the spoke spec)

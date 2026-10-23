@@ -2,9 +2,395 @@
 # glm-code — Claude Code pointed at Z.ai's Anthropic-compatible endpoint.
 # Spoke runner for the hub-spoke orchestrator. GLM_MODEL=glm-4.7 for the cheap tier.
 set -u
-KEY_FILE="$HOME/.config/zai/api_key"
-[ -r "$KEY_FILE" ] || { echo "glm-code: missing $KEY_FILE" >&2; exit 78; }
-MODEL="${GLM_MODEL:-glm-5.2}"
+
+SPOKE_TEMPLATE="$HOME/.claude-spoke"
+
+# --- Per-spoke CLAUDE_CONFIG_DIR (2026-09-04) ---
+# Every spoke used to share this ONE fixed dir, so concurrent same-repo spokes
+# cross-pollinated session state (projects/, sessions/) and died ~6min in
+# (2026-08-14 incident, see PROTOCOL.md). Fix: each spoke process gets its own
+# physically separate dir, seeded from the shared slim template so the
+# ~670K-token saving (vs a full ~/.claude) is preserved, then removed when the
+# process ends.
+#
+# Dir name keys off a caller-supplied task id (GLM_TASK_ID — e.g. the hub's
+# $TID from PROTOCOL.md's firing pattern) so it's greppable during debugging;
+# falls back to this process's own PID when no task id was passed in.
+spoke_dir_for() {
+  echo "$HOME/.claude-spoke-${1:-$$}"
+}
+
+# Seed $2 (a fresh per-spoke config dir) from $1 (the shared static template).
+# Copies — never symlinks; a symlink back to the template IS the shared dir,
+# the exact bug this exists to fix — everything EXCEPT per-session state:
+# projects/ (session transcripts, the actual cross-pollination vector),
+# sessions/, session-env/, shell-snapshots/, tasks/ (todo/task state keyed by
+# session id), and backups/ (historical .claude.json backups, not needed for
+# a spoke to run). Static config that stays (CLAUDE.md, settings.json, the
+# plugins/ cache, .claude.json trust-dialog state, etc.) is preserved so a
+# fresh dir behaves like the existing slim template, not a cold ~/.claude.
+seed_spoke_config_dir() {
+  local template="$1" dest="$2"
+  rm -rf "$dest"
+  if [ -d "$template" ]; then
+    # --reflink=auto asks for a CoW reflink (btrfs/XFS/ZFS): instant, no real
+    # disk duplication of the template. Falls back to a plain recursive copy
+    # on filesystems that don't support reflinks (ext4).
+    cp -R --reflink=auto "$template" "$dest" 2>/dev/null || cp -R "$template" "$dest"
+    rm -rf "$dest/projects" "$dest/sessions" "$dest/session-env" \
+           "$dest/shell-snapshots" "$dest/tasks" "$dest/backups"
+  else
+    mkdir -p "$dest"
+  fi
+}
+
+# --- Worktree per spoke (2026-09-04, Step 2) ---
+# Spokes used to edit the target repo's shared working tree in place, so a
+# parallel session's stash/reset/overwrite could clobber a spoke's work (see
+# "Worktree for shared repos" in the Obsidian vault). Default: give every
+# spoke its own git worktree, checked out on branch spoke/<tid>, so it edits
+# an isolated copy. Opt-out: GLM_NO_WORKTREE=1 (for a spec whose whole point
+# is the shared tree). Silently skipped (sets WT="") when cwd isn't inside a
+# git repo, or when worktree creation fails for any reason.
+# The launcher does NOT remove the worktree — the hub does, via `spoke-wt
+# drop <tid>`, after reading the spoke's report.
+# Sets the global $WT to the worktree path on success, "" otherwise. Reads
+# cwd via `git rev-parse`, so call this AFTER cd'ing into the target repo.
+setup_worktree() {
+  WT=""
+  local main tid
+  main="$(git rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$main" ] || return 0
+  tid="${GLM_TASK_ID:-$$}"
+  WT="$HOME/.claude/orchestrator/worktrees/$(basename "$main")/$tid"
+  mkdir -p "$(dirname "$WT")"
+  if ! git -C "$main" worktree add "$WT" -b "spoke/$tid" >/dev/null 2>&1; then
+    echo "glm-code: git worktree add failed, falling back to in-place ($main)" >&2
+    WT=""
+    return 0
+  fi
+  # .orchestrator/ stays a symlink into the main checkout — specs, reports,
+  # state, and logs must keep landing where the hub and the dashboard's
+  # chokidar watchers actually read them.
+  mkdir -p "$main/.orchestrator"
+  rm -rf "$WT/.orchestrator"
+  ln -s "$main/.orchestrator" "$WT/.orchestrator"
+  # node_modules: pnpm repos get a REAL per-worktree install (content-
+  # addressable store makes this cheap — mostly hardlinking, not
+  # downloading), so workspace package links (@nuzum/*, etc.) resolve
+  # INSIDE the worktree and never alias into main or a sibling worktree.
+  # Symlinking main's node_modules in used to be the plan ("spokes must not
+  # npm install per worktree") but a symlink means the worktree's
+  # node_modules IS the same physical directory as main's: anything that
+  # writes into node_modules from the worktree (a postinstall/prepare
+  # script, an explicit `pnpm install` a spec runs, pnpm itself relinking)
+  # corrupts main and every sibling worktree at once (2026-09-19 incident —
+  # see vault note glm-worktree-node-modules-crosslink: cross-worktree
+  # readlinks, main's links pointing at deleted worktrees after cleanup).
+  # Falls back to the old shared-symlink behavior for non-pnpm repos
+  # (npm/yarn) and if the install itself fails for any reason — loudly, so a
+  # failed install doesn't silently reinstate the cross-worktree bug.
+  # `pnpm` is resolved to an absolute path first (same reasoning as
+  # $CLAUDE_BIN below): launchd/cron jobs run with a bare PATH that excludes
+  # ~/.local/bin, so a scheduled spoke would otherwise hit "pnpm: command
+  # not found" and silently take the shared-symlink fallback.
+  PNPM_BIN="$(command -v pnpm 2>/dev/null || true)"
+  [ -n "$PNPM_BIN" ] || PNPM_BIN="$HOME/.local/bin/pnpm"
+  nm_done=0
+  if [ -f "$main/pnpm-lock.yaml" ]; then
+    if ( cd "$WT" && CI=true "$PNPM_BIN" install --frozen-lockfile --prefer-offline >/dev/null 2>&1 ); then
+      nm_done=1
+    else
+      echo "glm-code: per-worktree pnpm install failed in $WT — falling back to SHARED node_modules symlinks (cross-worktree corruption risk)" >&2
+    fi
+  fi
+  if [ "$nm_done" = 0 ] && [ -e "$main/node_modules" ]; then
+    rm -rf "$WT/node_modules"
+    ln -s "$main/node_modules" "$WT/node_modules"
+    # pnpm/npm workspace packages (apps/*, packages/*, test/*, ...) each keep
+    # their own node_modules — the root symlink above misses those, so a
+    # worktree spoke can't resolve workspace-local deps (e.g. a test package's
+    # own @playwright/test). Mirror the same symlink pattern per workspace dir.
+    while IFS= read -r nm; do
+      rel="${nm#"$main"/}"
+      mkdir -p "$WT/$(dirname "$rel")"
+      rm -rf "$WT/$rel"
+      ln -s "$nm" "$WT/$rel"
+    done < <(find "$main" -mindepth 2 -maxdepth 4 -type d -name node_modules -not -path '*/node_modules/*')
+  fi
+  # Untracked .env* files at repo root: gates need them, and `git worktree
+  # add` only checks out tracked files.
+  git -C "$main" ls-files --others --ignored --exclude-standard -- . 2>/dev/null \
+    | grep -E '^\.env' \
+    | while IFS= read -r f; do cp "$main/$f" "$WT/$f" 2>/dev/null; done
+}
+
+# --- File claims (2026-09-04, Step 4) ---
+# File ownership used to live only as PROSE in each spec's `## Constraints`
+# ("Only touch: a.ts, b.ts") — unreadable by anything. The spec contract now
+# also carries a machine-readable `## Owns:` list, and this launcher registers
+# it in <main-repo>/.orchestrator/state/claims.json (see
+# ~/.claude/orchestrator/claims.py) so concurrent spokes and sessions can SEE
+# who holds what, and so a launch whose paths overlap a live claim is refused
+# up front instead of discovered in a merge conflict.
+#
+# This is observability + a launcher-side refusal, NOT collision prevention:
+# actual isolation comes from the per-spoke worktrees above. Override a refusal
+# with GLM_FORCE_CLAIM=1.
+CLAIMS_PY="$HOME/.claude/orchestrator/claims.py"
+
+# Extract the `## Owns:` list from a spec file: every `- <path>` line under that
+# heading, stopping at the next `#` heading. Anything else in the block (prose,
+# blank lines) is ignored, so a spec that only prose-describes ownership simply
+# yields an empty list = a presence-only claim.
+parse_owns() {
+  awk '
+    tolower($0) ~ /^##[[:space:]]*owns:/ { inblock = 1; next }
+    inblock && /^#/           { inblock = 0 }
+    inblock && /^[[:space:]]*-[[:space:]]+/ {
+      sub(/^[[:space:]]*-[[:space:]]+/, "")
+      sub(/[[:space:]]+$/, "")
+      gsub(/`/, "")
+      if (length($0) > 0) print
+    }
+  ' "$1" 2>/dev/null
+}
+
+# Self-check: exercises the seed/cleanup path with a fake task id, no API key
+# or Z.ai call needed. `glm-code --selfcheck`.
+if [ "${1:-}" = "--selfcheck" ]; then
+  d="$(spoke_dir_for "selfcheck-fake-task-$$")"
+  echo "glm-code --selfcheck: seeding $d"
+  seed_spoke_config_dir "$SPOKE_TEMPLATE" "$d"
+  [ -d "$d" ] || { echo "FAIL: dir not created"; exit 1; }
+  [ -f "$d/CLAUDE.md" ] && [ -f "$d/settings.json" ] || {
+    echo "FAIL: template not actually seeded (missing CLAUDE.md/settings.json — is $SPOKE_TEMPLATE missing?)"
+    rm -rf "$d"; exit 1
+  }
+  [ -d "$d/projects" ] && { echo "FAIL: per-session projects/ was copied"; rm -rf "$d"; exit 1; }
+  echo "OK: $d exists, seeded from template, per-session state excluded"
+  rm -rf "$d"
+  [ -d "$d" ] && { echo "FAIL: cleanup left $d behind"; exit 1; }
+  echo "OK: $d removed"
+  echo "glm-code --selfcheck: PASS"
+
+  # --- Worktree path self-check ---
+  echo
+  echo "glm-code --selfcheck: worktree path"
+  WTBASE="$(mktemp -d "${TMPDIR:-/tmp}/glm-code-wt-selfcheck.XXXXXX")"
+  REPO="$WTBASE/repo"
+  mkdir -p "$REPO"
+  git init -q "$REPO"
+  git -C "$REPO" config user.email "spoke@local"
+  git -C "$REPO" config user.name "spoke"
+  echo "hello" > "$REPO/file.txt"
+  printf '.orchestrator/\n.env*\n' > "$REPO/.gitignore"
+  git -C "$REPO" add file.txt .gitignore
+  git -C "$REPO" commit -q -m init
+  mkdir -p "$REPO/.orchestrator/reports"
+  echo "secret=1" > "$REPO/.env.local"
+  FAKE_TID="selfcheck-wt-$$"
+
+  # pnpm-repo fixture (2026-09-19 fix): a real node_modules in main PLUS a
+  # pnpm-lock.yaml so setup_worktree takes the per-worktree-install branch
+  # instead of the elif shared-symlink fallback — a shimmed `pnpm` on PATH
+  # keeps this offline/instant while still exercising the real branch logic.
+  # Regresses loudly: if the pnpm-install branch is ever removed or broken,
+  # this repo has main/node_modules present, so the code falls through to
+  # symlinking and the assertion below catches it.
+  mkdir -p "$REPO/node_modules" "$WTBASE/bin"
+  echo '{}' > "$REPO/package.json"
+  echo 'lockfileVersion: 9.0' > "$REPO/pnpm-lock.yaml"
+  printf '#!/bin/sh\n[ "$1" = install ] && mkdir -p node_modules && exit 0\nexit 1\n' > "$WTBASE/bin/pnpm"
+  chmod +x "$WTBASE/bin/pnpm"
+
+  wt_status=0
+  (
+    set -e
+    cd "$REPO"
+    export GLM_TASK_ID="$FAKE_TID"
+    export PATH="$WTBASE/bin:$PATH"
+    setup_worktree
+    [ -n "$WT" ] || { echo "FAIL: WT not set"; exit 1; }
+    [ "$(git -C "$WT" branch --show-current)" = "spoke/$FAKE_TID" ] || { echo "FAIL: wrong branch"; exit 1; }
+    [ -L "$WT/.orchestrator" ] || { echo "FAIL: .orchestrator not a symlink"; exit 1; }
+    [ "$(cd "$WT/.orchestrator" && pwd -P)" = "$(cd "$REPO/.orchestrator" && pwd -P)" ] || { echo "FAIL: .orchestrator symlink target"; exit 1; }
+    [ -f "$WT/.env.local" ] || { echo "FAIL: .env.local not copied"; exit 1; }
+    [ ! -L "$WT/node_modules" ] || { echo "FAIL: node_modules is a symlink — pnpm-repo worktree took the shared-symlink fallback instead of per-worktree install (regression of 2026-09-19 fix)"; exit 1; }
+    [ -d "$WT/node_modules" ] || { echo "FAIL: node_modules missing entirely in worktree"; exit 1; }
+    echo "OK: worktree created on spoke/$FAKE_TID, .orchestrator symlinked to main, .env.local present, node_modules is a real per-worktree dir (not a shared symlink)"
+
+    echo "wt-change" > "$WT/newfile.txt"
+    diffout="$(spoke-wt diff "$FAKE_TID")"
+    echo "$diffout" | grep -q "newfile.txt" || { echo "FAIL: spoke-wt diff didn't show newfile.txt"; exit 1; }
+    echo "OK: spoke-wt diff shows the change"
+
+    spoke-wt apply "$FAKE_TID" || { echo "FAIL: spoke-wt apply"; exit 1; }
+    git -C "$REPO" status --porcelain | grep -q "newfile.txt" || { echo "FAIL: apply didn't land in main"; exit 1; }
+    echo "OK: spoke-wt apply landed the change in main"
+
+    spoke-wt drop "$FAKE_TID" || { echo "FAIL: spoke-wt drop"; exit 1; }
+    [ -d "$WT" ] && { echo "FAIL: worktree dir still present after drop"; exit 1; }
+    git -C "$REPO" branch --list "spoke/$FAKE_TID" | grep -q . && { echo "FAIL: branch still present after drop"; exit 1; }
+    echo "OK: spoke-wt drop removed worktree + branch"
+  ) || wt_status=1
+
+  if [ "$wt_status" = 0 ]; then
+    (
+      set -e
+      cd "$REPO"
+      export GLM_TASK_ID="$FAKE_TID-noopt"
+      GLM_NO_WORKTREE=1
+      WT=""
+      if [ "${GLM_NO_WORKTREE:-}" != "1" ]; then setup_worktree; fi
+      [ -z "$WT" ] || { echo "FAIL: GLM_NO_WORKTREE=1 still created a worktree"; exit 1; }
+      git -C "$REPO" worktree list --porcelain | grep -q "spoke/$FAKE_TID-noopt" && { echo "FAIL: worktree branch exists despite opt-out"; exit 1; }
+      echo "OK: GLM_NO_WORKTREE=1 skips worktree creation"
+    ) || wt_status=1
+  fi
+
+  rm -rf "$WTBASE"
+  if [ "$wt_status" != 0 ]; then
+    echo "glm-code --selfcheck: worktree path FAILED"
+    exit 1
+  fi
+  echo "glm-code --selfcheck: worktree path PASS"
+
+  # --- Claims registry path (2026-09-04, Step 4) ---
+  # Fires REAL glm-code launches against a throwaway git repo with a shimmed
+  # `claude` (a plain sleep), so the whole launcher path — parse ## Owns:,
+  # check, add, heartbeat, release — is exercised end to end with no API key
+  # spent and no Z.ai call made.
+  echo
+  echo "glm-code --selfcheck: claims registry"
+  cl_status=0
+  CBASE="$(mktemp -d "${TMPDIR:-/tmp}/glm-code-claims-selfcheck.XXXXXX")"
+  CREPO="$CBASE/repo"
+  mkdir -p "$CREPO/.orchestrator/specs" "$CBASE/bin"
+  git init -q "$CREPO"
+  git -C "$CREPO" config user.email "spoke@local"
+  git -C "$CREPO" config user.name "spoke"
+  echo "readme" > "$CREPO/README.md"
+  git -C "$CREPO" add README.md
+  git -C "$CREPO" commit -q -m init
+  # No `exec`, so the shim keeps glm-code's argv (and therefore $MARKER) —
+  # that's what makes the orphan cleanup below targetable.
+  printf '#!/bin/sh\nsleep "${GLM_SC_SLEEP:-3}"\n' > "$CBASE/bin/claude"
+  chmod +x "$CBASE/bin/claude"
+  printf '# Task sc-a\n## Owns:\n- README.md\n- server/adapters\n' > "$CREPO/.orchestrator/specs/sc-a.md"
+  printf '# Task sc-b\n## Owns:\n- README.md\n' > "$CREPO/.orchestrator/specs/sc-b.md"
+  MARKER="glmsc-$$"
+
+  hb_of() { python3 "$CLAIMS_PY" list "$1" --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(next((c["heartbeatAt"] for c in d if c["taskId"]==sys.argv[1]),""))' "$2"; }
+
+  (
+    set -e
+    cd "$CREPO"
+    export PATH="$CBASE/bin:$PATH"
+    export GLM_NO_WORKTREE=1
+    export GLM_CLAIM_HEARTBEAT_SEC=1
+    export GLM_SC_SLEEP=40
+
+    GLM_TASK_ID=sc-a glm-code -p "$MARKER" >/dev/null 2>&1 &
+    A_PID=$!
+    # The claim lands only after the per-spoke config dir is seeded (a ~135M
+    # clonefile, measured ~3s) — poll rather than guess a sleep constant.
+    sc_waited=0
+    until python3 "$CLAIMS_PY" list "$CREPO" | grep -q "^sc-a  alive"; do
+      sc_waited=$((sc_waited + 1))
+      [ "$sc_waited" -gt 30 ] && { echo "FAIL: sc-a claim never appeared (30s)"; exit 1; }
+      sleep 1
+    done
+
+    python3 "$CLAIMS_PY" list "$CREPO" | grep -q "^sc-a  alive" \
+      || { echo "FAIL: sc-a claim not registered"; python3 "$CLAIMS_PY" list "$CREPO"; exit 1; }
+    python3 "$CLAIMS_PY" list "$CREPO" | grep -q "pid=$A_PID" \
+      || { echo "FAIL: claim pid is not the launcher pid ($A_PID)"; exit 1; }
+    python3 "$CLAIMS_PY" list "$CREPO" | grep -q "owns=README.md,server/adapters" \
+      || { echo "FAIL: ## Owns: list not parsed from the spec"; exit 1; }
+    echo "OK: claim registered from the spec's ## Owns: list, pid=$A_PID"
+
+    hb1="$(hb_of "$CREPO" sc-a)"
+    sleep 3
+    hb2="$(hb_of "$CREPO" sc-a)"
+    [ -n "$hb2" ] && [ "$hb1" != "$hb2" ] \
+      || { echo "FAIL: heartbeat did not advance ($hb1 -> $hb2)"; exit 1; }
+    echo "OK: heartbeat advanced $hb1 -> $hb2"
+
+    if conflict_out="$(GLM_TASK_ID=sc-b GLM_SC_SLEEP=1 glm-code -p "$MARKER" 2>&1)"; then
+      echo "FAIL: overlapping launch was NOT refused"; exit 1
+    fi
+    echo "$conflict_out" | grep -q "CONFLICT" \
+      || { echo "FAIL: refusal printed no conflict detail:"; echo "$conflict_out"; exit 1; }
+    echo "OK: overlapping launch refused (exit 1), conflicting claim printed"
+
+    if ! GLM_TASK_ID=sc-b GLM_FORCE_CLAIM=1 GLM_SC_SLEEP=1 glm-code -p "$MARKER" >/dev/null 2>&1; then
+      echo "FAIL: GLM_FORCE_CLAIM=1 did not proceed"; exit 1
+    fi
+    python3 "$CLAIMS_PY" list "$CREPO" | grep -q "^sc-b" \
+      && { echo "FAIL: sc-b claim survived a clean exit"; exit 1; }
+    python3 "$CLAIMS_PY" list "$CREPO" | grep -q "^sc-a  alive" \
+      || { echo "FAIL: sc-a claim lost while sc-b ran"; exit 1; }
+    echo "OK: GLM_FORCE_CLAIM=1 proceeded; its claim released on exit; sc-a untouched"
+
+    # SIGKILL the wrapper: the EXIT trap never runs, so the claim MUST survive
+    # and be reaped by TTL rather than by cleanup code. The heartbeat subshell
+    # now self-stops within one tick once WRAPPER_PID is gone (see the
+    # launcher comment above the heartbeat block), so this pkill is
+    # belt-and-braces, not load-bearing for this test — it just tidies up the
+    # shim's own children. Backdate heartbeatAt below to prove expiry is what
+    # actually releases the claim.
+    kill -9 "$A_PID" 2>/dev/null || true
+    sleep 1
+    python3 "$CLAIMS_PY" list "$CREPO" | grep -q "^sc-a  alive" \
+      || { echo "FAIL: claim vanished after kill -9 (should persist until TTL)"; exit 1; }
+    echo "OK: kill -9'd launcher left its claim in place"
+
+    pkill -9 -f "$MARKER" >/dev/null 2>&1 || true
+    sleep 1
+    python3 - "$CREPO" <<'PY'
+import datetime, json, os, sys
+p = os.path.join(sys.argv[1], '.orchestrator', 'state', 'claims.json')
+with open(p) as fh:
+    data = json.load(fh)
+old = (datetime.datetime.now(datetime.timezone.utc)
+       - datetime.timedelta(minutes=10)).strftime('%Y-%m-%dT%H:%M:%SZ')
+for c in data:
+    c['heartbeatAt'] = old
+with open(p, 'w') as fh:
+    json.dump(data, fh)
+PY
+    python3 "$CLAIMS_PY" check "$CREPO" -- README.md \
+      || { echo "FAIL: backdated (expired) claim still blocks a launch"; exit 1; }
+    python3 "$CLAIMS_PY" list "$CREPO" | grep -q "^claims: none" \
+      || { echo "FAIL: expired claim was not pruned"; python3 "$CLAIMS_PY" list "$CREPO"; exit 1; }
+    echo "OK: backdated claim expired by TTL — no longer blocks, pruned on read"
+  ) || cl_status=1
+
+  pkill -9 -f "$MARKER" >/dev/null 2>&1 || true
+  rm -rf "$CBASE"
+  if [ "$cl_status" = 0 ]; then
+    echo "glm-code --selfcheck: claims registry PASS"
+    exit 0
+  else
+    echo "glm-code --selfcheck: claims registry FAILED"
+    exit 1
+  fi
+fi
+
+KEY_FILE="$HOME/.config/glm/api_key"
+# Linux port: key file is filled by the hub, never by this script. Missing/unreadable
+# => exit 2 (distinct from claude's own exit codes).
+[ -r "$KEY_FILE" ] || { echo "glm-code: missing GLM/Z.ai API key file $KEY_FILE (mode 600, one line). The hub fills it; it is never created here." >&2; exit 2; }
+MODEL="${GLM_MODEL:-glm-5.3}"
+# Subagent tier (the `sonnet` alias inside the spoke). Defaults to the spoke's own model;
+# set GLM_SUBAGENT_MODEL=glm-4.7 to make a 5.3 hub delegate volume work down to 4.7
+# (used by /last-straw, where GLM replaces the whole Claude stack: 5.3 = hub, 4.7 = worker).
+SUB_MODEL="${GLM_SUBAGENT_MODEL:-$MODEL}"
+case "$SUB_MODEL" in
+  glm-*) ;;
+  *) echo "glm-code: GLM_SUBAGENT_MODEL must be a glm-* model (got '$SUB_MODEL')" >&2; exit 64 ;;
+esac
 export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 export ANTHROPIC_AUTH_TOKEN="$(cat "$KEY_FILE")"
 # The hub runs on a Claude model alias (fable / opus / sonnet / …) which spokes
@@ -12,7 +398,7 @@ export ANTHROPIC_AUTH_TOKEN="$(cat "$KEY_FILE")"
 # GLM model regardless of which Claude model the hub uses:
 export ANTHROPIC_MODEL="$MODEL"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$SUB_MODEL"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7"
 # Don't inherit the hub's key if set:
 unset ANTHROPIC_API_KEY
@@ -21,6 +407,164 @@ unset ANTHROPIC_API_KEY
 export ORCHESTRATOR_SPOKE=1
 # Slim config: spokes must NOT inherit the full ~/.claude (plugins, skills,
 # caveman/instinct hooks) — that inheritance measured ~670K tokens per trivial
-# spoke. Minimal dir = spoke rules + rtk hook only.
-export CLAUDE_CONFIG_DIR="$HOME/.claude-spoke"
-exec claude "$@"
+# spoke. Minimal dir = spoke rules + rtk hook only. Per-spoke since 2026-09-04
+# (see block above) — no longer the one fixed ~/.claude-spoke dir.
+export CLAUDE_CONFIG_DIR="$(spoke_dir_for "${GLM_TASK_ID:-}")"
+seed_spoke_config_dir "$SPOKE_TEMPLATE" "$CLAUDE_CONFIG_DIR"
+
+# Node version: spokes otherwise inherit whatever `node` is first on PATH
+# (observed: /usr/local/bin/node v20.2.0), but target repos commonly declare
+# "engines": {"node": ">=22"} and CI runs 22 — mismatched typecheck/vitest
+# runs fail with module-resolution errors. Prefer the newest nvm-installed
+# Node 22.x if present; no-op (and no error) when nvm/22 isn't installed.
+NVM_NODE22="$(ls -d "$HOME"/.nvm/versions/node/v22* 2>/dev/null | sort -V | tail -1)"
+[ -n "$NVM_NODE22" ] && export PATH="${NVM_NODE22%/}/bin:$PATH"
+
+# Claim this spoke's files BEFORE anything else happens (before the worktree is
+# created, before the stub report, before `claude` starts) so a refusal costs
+# nothing and a spoke that dies at startup still has a claim to expire.
+# MAIN_ROOT is resolved HERE, at the launch cwd — after the `cd "$WT"` below,
+# `git rev-parse --show-toplevel` would return the WORKTREE, and claims would
+# silently land in the wrong tree.
+MAIN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+CLAIM_ACTIVE=0
+HB_PID=""
+if [ -n "${GLM_TASK_ID:-}" ] && [ -n "$MAIN_ROOT" ] && [ -f "$CLAIMS_PY" ] \
+   && [ -d "$MAIN_ROOT/.orchestrator" ]; then
+  spec_file="$MAIN_ROOT/.orchestrator/specs/$GLM_TASK_ID.md"
+  owns=()
+  if [ -f "$spec_file" ]; then
+    while IFS= read -r own_line; do
+      [ -n "$own_line" ] && owns[${#owns[@]}]="$own_line"
+    done <<EOF
+$(parse_owns "$spec_file")
+EOF
+  fi
+  # bash 3.2 (macOS): expanding an empty array under `set -u` is an error —
+  # hence the ${arr[@]+...} guard on every expansion below.
+  if [ "${GLM_FORCE_CLAIM:-}" != "1" ] && [ "${#owns[@]}" -gt 0 ]; then
+    # --ignore-task: PROTOCOL's FIX path refires the SAME $TID, and a task must
+    # never conflict with its own leftover claim.
+    python3 "$CLAIMS_PY" check "$MAIN_ROOT" --ignore-task "$GLM_TASK_ID" \
+      -- ${owns[@]+"${owns[@]}"}
+    claim_rc=$?
+    # ONLY exit 1 means "conflict". Any other nonzero (2 = bad usage, 3 = lock
+    # acquisition timeout, 127 = no python3, …) is a broken registry, and a
+    # broken registry must never stop a spoke from launching — claims are
+    # advisory, the worktree is the real isolation.
+    if [ "$claim_rc" = 1 ]; then
+      echo "glm-code: refusing to launch $GLM_TASK_ID — its ## Owns: paths overlap a live claim (override: GLM_FORCE_CLAIM=1)" >&2
+      rm -rf "$CLAUDE_CONFIG_DIR"   # no EXIT trap installed yet
+      exit 1
+    elif [ "$claim_rc" != 0 ]; then
+      echo "glm-code: claims check unavailable (exit $claim_rc) — launching anyway" >&2
+    fi
+  fi
+  if python3 "$CLAIMS_PY" add "$GLM_TASK_ID" "$MAIN_ROOT" "$$" \
+       -- ${owns[@]+"${owns[@]}"}; then
+    CLAIM_ACTIVE=1
+  fi
+fi
+
+# Worktree per spoke (see setup_worktree() above) — default on, opt out with
+# GLM_NO_WORKTREE=1 for a spec whose whole point is the shared tree.
+WT=""
+[ "${GLM_NO_WORKTREE:-}" != "1" ] && setup_worktree
+if [ -n "$WT" ]; then
+  cd "$WT" || { echo "glm-code: cd to worktree failed, running in place" >&2; WT=""; }
+fi
+
+# --- in_progress stub report (2026-09-04, Step 3) ---
+# The task board (agentic-os dashboard) can only show a not_started → in_progress
+# transition if something writes it BEFORE the spoke's own process starts — a
+# spoke can't self-report a status it hasn't reached yet. Written by the
+# launcher, not trusted to the spoke: if a report for this task id doesn't
+# already exist, stub one with `## Status: in_progress`. The spoke's own
+# mandatory report (PROTOCOL.md "When done") overwrites this stub with the
+# terminal `## Status: done|failed` when it finishes; a spoke that dies
+# leaves `in_progress` on disk (stale-detection is a separate concern, not
+# this launcher's job). Silently skipped when GLM_TASK_ID is unset or this
+# isn't an orchestrator-managed repo (no .orchestrator/ dir at all — nothing
+# for the dashboard to read anyway). Gate on .orchestrator/, NOT reports/:
+# reports/ only gets created by the FIRST finished spoke in a repo (nothing
+# else pre-creates it — the hub only ever writes specs/), so gating on its
+# existence made every repo's first-ever spoke silently skip the stub.
+if [ -n "${GLM_TASK_ID:-}" ]; then
+  orch_dir="$(pwd)/.orchestrator"
+  reports_dir="$orch_dir/reports"
+  stub_report="$reports_dir/$GLM_TASK_ID.md"
+  if [ -d "$orch_dir" ] && [ ! -e "$stub_report" ]; then
+    mkdir -p "$reports_dir"
+    printf '# %s\n## Status: in_progress\n' "$GLM_TASK_ID" > "$stub_report"
+  fi
+fi
+
+# Run claude as a tracked child (not `exec`) so the EXIT trap below can remove
+# this spoke's config dir once it's done. `timeout`'s SIGTERM (PROTOCOL.md's
+# firing pattern) lands on this script, not the child, when not exec'd — the
+# TERM/INT trap forwards it explicitly so a timeout kill still reaches and
+# stops `claude`, matching the old `exec`'d behavior. Belt-and-braces reaper
+# for anything that slips through anyway lives in cache-clean.sh.
+# `claude` is resolved here rather than invoked by bare name: launchd/cron
+# jobs run with PATH=/usr/bin:/bin:/usr/sbin:/sbin, which does NOT include
+# ~/.local/bin, so a scheduled spoke died with "claude: command not found".
+# `command -v` is tried FIRST so PATH precedence is preserved exactly as
+# before for every existing caller (notably --selfcheck, which shims a fake
+# `claude` onto PATH and must keep winning); the absolute path is only a
+# fallback for when PATH has no `claude` at all.
+CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
+[ -n "$CLAUDE_BIN" ] || CLAUDE_BIN="$HOME/.local/bin/claude"
+# Ponytail in spokes (2026-10-21): load the hub's installed ponytail plugin for
+# this session only, so spokes get the same version as normal sessions without
+# a plugins/ tree in the slim template. Skipped silently if it isn't installed.
+PONYTAIL_DIR="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.claude/plugins/installed_plugins.json")))["plugins"]["ponytail@ponytail"][0]["installPath"])' 2>/dev/null)"
+PLUGIN_ARGS=()
+[ -n "$PONYTAIL_DIR" ] && [ -d "$PONYTAIL_DIR" ] && PLUGIN_ARGS=(--plugin-dir "$PONYTAIL_DIR")
+"$CLAUDE_BIN" ${PLUGIN_ARGS[@]+"${PLUGIN_ARGS[@]}"} "$@" &
+CHILD=$!
+
+# Claim heartbeat: refresh heartbeatAt while the spoke actually lives. Staleness
+# is TTL-based rather than PID-based on purpose — a pid means nothing to the
+# dashboard when the claim came from a remote peer. `claims.py heartbeat` is
+# update-only, so a tick racing the EXIT trap's `remove` can't resurrect the
+# claim.
+#
+# The `kill -0 "$CHILD"` guard alone is NOT enough to stop an orphaned loop:
+# if THIS wrapper is SIGKILLed, `claude` ($CHILD) is not killed with it — it
+# is simply reparented and keeps running, so `kill -0 "$CHILD"` keeps
+# succeeding and the heartbeat subshell would refresh the claim forever,
+# defeating the whole TTL design (the claim never expires while the possibly
+# hung child lives). WRAPPER_PID is captured explicitly, before backgrounding
+# (not read as `$$`/`$BASHPID` inside the subshell — that is unreliable
+# across bash versions/platforms for `( ... ) &`), and the loop also exits
+# once the wrapper itself is gone. That is what makes "TTL expiry after the
+# wrapper dies" the real designed path for a -9'd launcher, rather than
+# "never expires as long as the child is stuck".
+if [ "$CLAIM_ACTIVE" = 1 ]; then
+  WRAPPER_PID=$$
+  (
+    while sleep "${GLM_CLAIM_HEARTBEAT_SEC:-60}"; do
+      kill -0 "$CHILD" 2>/dev/null || exit 0
+      kill -0 "$WRAPPER_PID" 2>/dev/null || exit 0
+      python3 "$CLAIMS_PY" heartbeat "$GLM_TASK_ID" "$MAIN_ROOT" >/dev/null 2>&1
+    done
+  ) &
+  HB_PID=$!
+fi
+# HUP too — a closed terminal/tmux pane/dropped SSH session sends SIGHUP to
+# this script, not just TERM/INT (e.g. a timeout kill). Without it the parent
+# dies here, the child is orphaned, and the EXIT trap below would rm -rf the
+# config dir out from under it.
+trap 'kill -TERM "$CHILD" 2>/dev/null; wait "$CHILD"; exit $?' TERM INT HUP
+# Belt-and-braces: if EXIT ever fires with the child still alive (a signal
+# path that skips the trap above, an unexpected early exit, etc.), stop it
+# first so it isn't left running against a config dir we're about to delete.
+# Order matters: stop the heartbeat first (so no tick can re-add the claim
+# after it is released), then the child, then release the claim, and only then
+# delete the config dir the child was running against.
+trap '[ -n "$HB_PID" ] && kill "$HB_PID" 2>/dev/null;
+      kill -0 "$CHILD" 2>/dev/null && { kill -TERM "$CHILD" 2>/dev/null; wait "$CHILD"; };
+      [ "$CLAIM_ACTIVE" = 1 ] && python3 "$CLAIMS_PY" remove "$GLM_TASK_ID" "$MAIN_ROOT" >/dev/null 2>&1;
+      rm -rf "$CLAUDE_CONFIG_DIR"' EXIT
+wait "$CHILD"
+exit $?

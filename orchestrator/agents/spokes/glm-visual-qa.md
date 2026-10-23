@@ -20,6 +20,9 @@ placeholder/lorem text left in, broken images, obviously misaligned spacing.
 One line per criterion: `N. PASS|FAIL|UNSURE — <visible evidence>`. Then `EXTRA:` list of
 unprompted defects (or "none"). No prose beyond that.
 
+Not part of the task-status board: this persona never writes `.orchestrator/reports/<task-id>.md`
+(no task-id, single-shot CLI answer only) — no `## Status:` line applies here.
+
 ## Hub usage notes (not part of the prompt)
 - Fire: `glm-vision "$(cat <filled-template>)" shot1.png [shot2.png ...]` — costs 1 prompt
   (weight W_46V in quota ledger).

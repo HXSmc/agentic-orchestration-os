@@ -1,5 +1,5 @@
 # Counsel Advisor #5 — The Executor
-engine: glm-5.2
+engine: glm-5.3
 tagline: gives you the Monday morning action
 
 ## Persona instructions (inject verbatim into the spoke spec)

@@ -1,5 +1,5 @@
 # Counsel Advisor #1 — The Contrarian
-engine: glm-5.2
+engine: glm-5.3
 tagline: finds what will fail
 
 ## Persona instructions (inject verbatim into the spoke spec)

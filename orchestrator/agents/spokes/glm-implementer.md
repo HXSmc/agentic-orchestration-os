@@ -1,5 +1,5 @@
 # GLM Implementer
-engine: glm-5.2
+engine: glm-5.3
 tagline: default volume coder — features, tests, debugging to a spec contract
 skills: none invocable (spoke config carries no plugin runtime; ponytail discipline baked into ~/.claude-spoke/CLAUDE.md and restated below)
 
@@ -27,3 +27,4 @@ see will diff your work against the spec — write for that reviewer.
 The mandatory `.orchestrator/reports/<task-id>.md` per the spec's "When done" section:
 status (done|blocked), files changed, commands run with real output snippets, per-criterion
 ✅/❌/⚠ checklist, blockers. Final message = one-line status.
+The first heading of your report is `## Status: done` or `## Status: failed`.

@@ -1,5 +1,7 @@
 #!/bin/bash
-# Real GLM quota reading via the official glm-plan-usage plugin script.
+# Real GLM quota reading. Script is vendored locally (query-usage.mjs, copied
+# from the glm-plan-usage plugin) so this keeps working after that plugin is
+# uninstalled; falls back to the plugin cache glob only if the local copy is missing.
 #
 # CORRECTED 2026-07-14 (verified against the real z.ai dashboard by the user):
 # the raw "Quota limit data" block returns TWO entries, BOTH mislabeled by
@@ -23,10 +25,11 @@
 # resets over days and isn't the thing that blocks firing a spoke right now.
 # Exit 1 = query failed (fall back to the ledger estimate in PROTOCOL.md).
 set -u
-KEY_FILE="$HOME/.config/zai/api_key"
+KEY_FILE="$HOME/.config/glm/api_key"
 [ -r "$KEY_FILE" ] || { echo "glm-usage: missing $KEY_FILE" >&2; exit 1; }
-SCRIPT=$(ls -d "$HOME"/.claude/plugins/cache/zai-coding-plugins/glm-plan-usage/*/skills/usage-query-skill/scripts/query-usage.mjs 2>/dev/null | tail -1)
-[ -n "$SCRIPT" ] || { echo "glm-usage: plugin script not found (reinstall glm-plan-usage plugin)" >&2; exit 1; }
+SCRIPT="$HOME/.claude/orchestrator/state/query-usage.mjs"
+[ -r "$SCRIPT" ] || SCRIPT=$(ls -d "$HOME"/.claude/plugins/cache/zai-coding-plugins/glm-plan-usage/*/skills/usage-query-skill/scripts/query-usage.mjs 2>/dev/null | tail -1)
+[ -n "$SCRIPT" ] && [ -r "$SCRIPT" ] || { echo "glm-usage: query-usage.mjs not found (vendored copy missing and plugin cache fallback failed)" >&2; exit 1; }
 OUT=$(ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
       ANTHROPIC_AUTH_TOKEN="$(cat "$KEY_FILE")" \
       timeout 60 node "$SCRIPT" 2>&1) || { echo "glm-usage: query failed: $(echo "$OUT" | head -2)" >&2; exit 1; }
