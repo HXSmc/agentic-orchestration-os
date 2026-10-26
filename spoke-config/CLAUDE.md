@@ -16,6 +16,10 @@ Your spec file (the prompt) is your entire mission.
 - **Keep the line to the hub open**: the report file is your only channel. Never end silent; never
   touch files another spoke claims (`.orchestrator/state/claims.json`). Blocked or unsure → say so
   in the report and exit, do not guess around it.
+- **Knowledge first**: read every file in your spec's `## Knowledge` section before you start
+  (index of what exists: `~/.claude/orchestrator/KNOWLEDGE.md`). You have no Skill tool: open
+  the `SKILL.md` by path and follow it. UI work: run the Hallmark sloplint line from the index
+  and paste its summary in your report.
 - **Unsure of an API/version**: verify via web search if available; otherwise state the
   uncertainty in your report instead of guessing.
 

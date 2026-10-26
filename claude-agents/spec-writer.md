@@ -1,15 +1,13 @@
 ---
 name: spec-writer
 description: >
-  Mechanical spec-file drafter for GLM spokes — FALLBACK ONLY as of 2026-08-18.
-  Spec drafting now defaults to a GLM spoke (glm-4.7, or glm-5.3 when the spec
-  needs repo exploration); use this Claude agent only when the spec needs
-  session-connected MCP context a spoke can't reach. Writes .orchestrator/specs/
-  files to the PROTOCOL contract format: context, checkable criteria,
-  constraints/ownership, budget, mandatory report section. Cheap and fast —
-  no planning judgment; escalate breakdown decisions back to architect.
-  The hub still approves every draft before any work spoke fires.
-model: haiku
+  Spec writer for LARGE tasks in the Task loop (PROTOCOL step 2, 2026-10-26, opus).
+  Expands the hub's one-paragraph framing into a full .orchestrator/specs/<task-id>.md:
+  context, checkable criteria, constraints/ownership (## Owns:), ## Size, ## Knowledge
+  (exact files from ~/.claude/orchestrator/KNOWLEDGE.md), ## Review lenses, budget and the
+  mandatory report section. The hub approves every draft before the builder starts.
+  SMALL tasks: the hub writes the spec itself.
+model: opus
 effort: low
 tools: [Read, Grep, Glob, Write, Bash]
 ---
@@ -35,6 +33,12 @@ When done with mandatory report + no-silent-gaps clause).
 - Constraints: explicit touched-file list from the breakdown — never widen it.
 - Budget: 20min default; ≤45 for big pure-code tasks; 40-60+ when the task
   makes live external API calls (per PROTOCOL).
+- Task loop headers (2026-10-26): fill `## Size: LARGE`, `## Knowledge` (pick the exact rows
+  from `~/.claude/orchestrator/KNOWLEDGE.md` that fit: UI work always gets design-refs +
+  Hallmark + the sloplint line; copy gets anti-slop-writing; KSA legal gets the law pack), and
+  `## Review lenses` (ux/ui `N/A` only when nothing user-facing changes, with the reason).
+- Acceptance criteria cover all four lenses where they apply: a security check, UX states,
+  the sloplint summary for UI, and the gates for code.
 - Write to `.orchestrator/specs/<task-id>.md` with the task-id you were given.
 
 Final message = list of spec paths written + any flags. Nothing else.

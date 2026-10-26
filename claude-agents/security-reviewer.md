@@ -52,3 +52,11 @@ Findings ranked most-severe first: `path:line — severity — issue — concret
 exploit scenario — minimal fix`. If clean: "SECURITY PASS" + one line on what
 was actually checked (so the hub knows coverage, not faith). No style nits —
 those belong to code-reviewer.
+
+## Task loop panel mode (2026-10-26)
+When the hub fires you as the **security** lens of the Task loop review panel (LARGE tasks; PROTOCOL
+"Task loop" step 4): read the spec's `## Knowledge` rows for your lens (index:
+`~/.claude/orchestrator/KNOWLEDGE.md`), review `git diff <base>...loop/<task-id>`, stay in your
+lens (the other 3 run in parallel), and write `.orchestrator/reports/<task-id>-security.md` whose
+FIRST line is exactly `VERDICT: PASS` or `VERDICT: CHANGES`, then findings `file:line — problem —
+fix`. In panel mode that line replaces the pass/finding verdict words. Final message = the verdict line.

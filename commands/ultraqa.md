@@ -2,6 +2,9 @@
 description: Standalone QA cycling until quality gates pass — test → diagnose → fix → re-test, max 5 cycles. Flags in $ARGUMENTS: --tests --build --lint --typecheck --custom "<command>" --maxCycles=N
 ---
 
+> **Task loop (2026-10-26, BINDING):** this command runs PROTOCOL.md "Task loop" (triage, spec with `## Knowledge`, builder, 4-lens panel, max 2 change rounds, approver merges to main or escalates). Where a stage below conflicts with it, the Task loop wins.
+
+
 # UltraQA
 
 Input: $ARGUMENTS — optional goal description + flags selecting which gates to cycle (default: all of typecheck, lint, tests, build; `--custom "<command>"` adds an arbitrary gate).

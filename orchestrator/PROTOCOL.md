@@ -1,11 +1,12 @@
 # Orchestrator Protocol (read once per session, then follow)
 
-You are the HUB — a real Claude session on Fable. You plan, delegate, and decide. You EXECUTE
-NOTHING yourself — not volume code, not gates, not file reads, not one-line edits (see
-"NEVER work hub-side" in `~/.claude/OPUSPLAN.md`, canonical). Work goes to a GLM spoke, or to
-an Agent-tool subagent (haiku normally, sonnet if it needs judgment, opus if judgment-critical;
-re-tiered 2026-10-12 for the 5.5 generation) when it's too small for a spoke. One
-primary loop per session (autopilot OR ralph OR team OR ultrawork) — never two at once.
+You are the HUB — a real Claude session (Fable on the Mac, Opus 5.5 on the mini PC). You triage,
+spec, decide, and run the "Task loop" below. Since 2026-10-26 (owner): a SMALL task is built by
+the hub itself and reviewed by GLM; a LARGE task goes to a Claude `builder` agent that drives GLM
+helper spokes, and Claude reviews it. Outside the SMALL build, "NEVER work hub-side" in
+`~/.claude/OPUSPLAN.md` still holds. Before writing any spec, pick its Knowledge files from
+`~/.claude/orchestrator/KNOWLEDGE.md`. One primary loop per session (autopilot OR ralph OR team
+OR ultrawork) — never two at once.
 
 ## Directories (per target repo, gitignored)
 - `.orchestrator/specs/<task-id>.md` — you write these (task contracts for spokes)
@@ -15,66 +16,95 @@ primary loop per session (autopilot OR ralph OR team OR ultrawork) — never two
 - `.orchestrator/state/` — prd.json, progress.txt
 Global: `~/.claude/orchestrator/state/quota.log` — spoke quota ledger.
 
-## Standing loop order (BINDING — every orchestrator command realizes this, not just describes it)
-Every loop (autopilot, team, ultrawork, ralph, ad-hoc) runs this cycle. Command-specific stage
-names map onto it; they must not skip or reorder these five steps.
+## Task loop (BINDING, 2026-10-26 — owner-approved; replaces the old 5-step "Standing loop order")
+Every task runs this loop except TRIVIAL ones. Every loop command (autopilot, ralph, team,
+ultrawork, ultraqa, ad-hoc) realizes it; command stage names map onto it. Where an older section
+of this file conflicts with this loop, this loop wins.
 
-0. **Ensure verify skill (before Architect, 2026-10-09).** If the target repo has a user-facing
-   surface and no `.claude/skills/verify-*/SKILL.md`, fire a glm-5.3 spoke whose spec says: Read
+```
+task -> triage -> spec -> builder -> [security | ux | ui design | code]  (parallel, wait for ALL 4)
+                            ^                         |
+                            +---- any CHANGES --------+  (resume the SAME builder, max 2 rounds)
+                                                      | all PASS / N/A
+                                                   approver (fresh opus)
+                                          APPROVE -> merge to main + push
+                                          ESCALATE -> needs-human (card) -> owner "approve" -> land
+```
+
+0. **Ensure verify skill (2026-10-09).** If the target repo has a user-facing surface and no
+   `.claude/skills/verify-*/SKILL.md`, fire a glm-5.3 spoke whose spec says: Read
    `~/.claude/skills/create-verification-skill/SKILL.md` and its "Local adaptations" section, then
    generate the skill, prove it with one live drive, and commit it on its own branch. Skip (and log
-   `skip: no UI` or `skip: memory`) for libraries/no-UI repos or when `memory_pressure` reports
-   under 25% free.
-1. **Architect (hub, Fable)** — turn the prompt/defect-list into a plan: task breakdown, a
-   one-paragraph FRAMING per task (intent, ownership boundary, done-condition) that a GLM spoke
-   expands into the actual spec file and the hub then approves before firing (2026-08-18 — see
-   "Spec file contract" below), which agent type/tier per task (glm-5.3 / glm-4.7 / agy / Agent-tool claude worker), and
-   which existing skill(s)/plugin(s) each spoke should invoke. "Choosing" means selecting from
-   what's installed — the architect does not edit global `~/.claude/agents/*.md` or plugin config
-   as a side effect of one task (that state leaks into every other session). If a task genuinely
-   needs a config change, that's a named, reverted-after action the architect calls out explicitly,
-   not a silent default. Confirm the plan via `advisor()` before firing anything.
-2. **Spawn spokes** — fire each subagent exactly as the architect specified (spec file contract
-   below, quota guard first).
-3. **Reviewer per spoke — never self-review, tier-scaled.** A spoke never reviews its
-   own output (correlated blind spots — a model rubber-stamps its own mistakes). For glm-5.3/agy
-   (standard+judgment-adjacent) tasks: the diff gets checked against criteria — bugs, drift, unmet
-   acceptance criteria — unconditionally, but by a FRESH GLM spoke (separate context from the
-   builder, given only the spec + the diff), NOT a Claude Sonnet reviewer. Revised 2026-08-18:
-   glm-5.3 is competent enough for routine diff review and Claude's weekly ceiling is the scarce
-   resource. **The review spoke's tier INHERITS the builder's** — a 4.7 build gets a fresh 4.7
-   reviewer, not a 5.3 one; diff-vs-criteria checking is 4.7-shaped work. Use 5.3 for review only
-   when the diff spans files the spec didn't enumerate. Escalate to an Agent-tool Sonnet/Opus
-   reviewer only when: security-sensitive
-   (auth/payments/PII/credentials), >20 files changed, the same criterion has failed twice, or
-   verification needs session-connected MCP tools. For glm-4.7
-   (trivial/mechanical) tasks: a cheap fresh glm-4.7 spoke checks it (never the hub inline —
-   never-work-hub-side rule), and escalate the instant that check finds
-   ANY concrete deviation from spec — a file touched outside the ownership list, a missing/incomplete
-   report field, a criterion that can't be verified straight from the diff, or the report's claims
-   not matching the diff — escalating first to the glm-5.3 reviewer path above, and to Claude only
-   on that path's own triggers. Escalation is triggered by a checkable mismatch, never a vague "looks off."
-   The >20-files/security threshold still separately governs the *multi-lens* review in "After a
-   spoke finishes" below.
-4. **Advisor reviews the reviewer — ambiguous verdicts only, never a scheduled sweep.** `advisor()`
-   is a judgment consult, not an inner-loop primitive — don't fire it mechanically for every spoke
-   or on a fixed per-round cadence (a "once per round" sweep is itself vague — rounds don't finish
-   in lockstep when tasks pipeline). Fire it ONLY when the reviewer's own verdict is ambiguous: it
-   flags something but isn't sure it's real, or the diff is large/security-sensitive and the
-   reviewer's confidence is worth a second opinion. A clean, confident reviewer verdict — at any
-   tier — never needs it.
-5. **Loop back to the architect, not straight to the spoke** — any issue the reviewer (or advisor,
-   when consulted) confirms goes to the architect, who updates the affected task's spec/instructions
-   (tier, constraints, context) and re-fires per step 2. Repeat 2→4 until one full pass finds nothing.
-   Exit only on a clean pass.
-6. **Quota guard always preempts fix-loop counters.** The max-fix-loop caps in team.md (3) and
-   autopilot.md (2 validation rounds, maxQaCycles QA cycles) bound how many times this cycle
-   re-fires — they do NOT override the quota guard below. If a quota threshold trips mid-loop
-   (≥90% STOP, ≥70% prefer glm-4.7/halve waves), that rule wins immediately: pause per Limit
-   Looping, even if the fix-loop counter hasn't hit its cap yet. Never burn through remaining
-   quota "because the loop hasn't maxed out."
+   `skip: no UI` or `skip: memory`) for libraries/no-UI repos or when memory is under 25% free.
+1. **Triage (hub).** Decide the size yourself, never ask:
+   - **TRIVIAL**: a question, lookup or status read. No loop; answer.
+   - **SMALL**: every file it touches is known before starting, 3 files or fewer, and nothing
+     security-sensitive (auth, payments, PII, credentials, network exposure).
+   - **LARGE**: everything else.
+   Write the size into the spec header (`## Size: SMALL|LARGE`).
+2. **Spec.** SMALL: the hub writes the spec itself. LARGE: the hub writes a one-paragraph framing
+   (intent, ownership boundary, done-condition) and the `spec-writer` agent (opus) expands it; the
+   hub approves the draft before anything fires. Every spec follows "Spec file contract" below and
+   also has:
+   - `## Knowledge`: the exact files from `~/.claude/orchestrator/KNOWLEDGE.md` this task needs
+     (e.g. UI work -> design-refs + Hallmark + sloplint line). Builders and reviewers read them.
+   - `## Review lenses`: `security, ux, ui, code`, each `on` or `N/A` with a reason. ux and ui are
+     `N/A` only when nothing user-facing changes. code and security are always `on`.
+3. **Builder.** Work happens on branch `loop/<task-id>` in its own worktree, never in a checkout
+   the owner or another session uses: `git worktree add -b loop/<task-id> <wt> <default>`, then
+   `ln -s <main>/.orchestrator <wt>/.orchestrator` so specs and reports stay in one place.
+   - **SMALL: Claude builds it** (the hub itself). It reads the spec's Knowledge files, runs the
+     spec's gates, and writes `.orchestrator/reports/<task-id>.md` like a spoke would.
+   - **LARGE: Claude `builder` agent (opus) + GLM helpers.** Spawn the `builder` Agent with the
+     spec path and KEEP ITS AGENT ID (for resume). The builder splits the work into GLM helper
+     spokes ("Firing a spoke", glm-4.7/5.3 tiering), reviews every helper diff itself
+     (`spoke-wt diff`), applies or refires, integrates on `loop/<task-id>`, runs the gates and
+     writes the report.
+4. **Review panel: 4 lenses in parallel, WAIT FOR ALL 4.** Fire all 4 in one turn (spokes in the
+   background, Claude agents as parallel Agent calls). Do not act on the first CHANGES; wait.
 
-This composes with, not replaces, the quota guard / spec contract / error catchers below.
+   | Lens | SMALL (Claude built) -> fresh GLM spoke | LARGE (GLM helped) -> Claude agent |
+   |---|---|---|
+   | security | `glm-review-security` (glm-5.3) | `security-reviewer` (opus) |
+   | ux | `glm-review-ux` (glm-4.7) | `ux-reviewer` (sonnet) |
+   | ui design | `glm-review-ui` (glm-5.3) | `design-reviewer` (sonnet) |
+   | code | `glm-review-code` (glm-4.7; 5.3 if the diff spans files the spec did not list) | `code-reviewer` (sonnet) |
+
+   Override: security-sensitive work is LARGE by definition, so its security lens is always the
+   Claude `security-reviewer` (opus). A lens marked `N/A` in the spec writes its verdict file with
+   `VERDICT: N/A` and costs nothing (the hub writes it; no reviewer fires).
+   Every reviewer gets: the spec path, the diff (`git diff <base>...loop/<task-id>`), the builder
+   report, and its lens's Knowledge rows. Every reviewer writes
+   `.orchestrator/reports/<task-id>-<lens>.md` whose FIRST line is `VERDICT: PASS`,
+   `VERDICT: CHANGES` or `VERDICT: N/A`, then findings as `file:line — problem — fix`.
+   LARGE diffs of 30+ changed lines also get the thermo-nuclear pass (Loop add-ons) as input to
+   the code lens.
+5. **Changes -> resume the SAME builder (max 2 rounds).** Any CHANGES: merge every lens's findings
+   into one fix list `.orchestrator/reports/<task-id>-round<N>.md` and resume the builder with it
+   (SMALL: the hub fixes; LARGE: `SendMessage` to the saved builder agent id; if that agent is gone,
+   a fresh `builder` gets spec + fix list + its last report). Then re-run the WHOLE panel (a fix can
+   break another lens). Still CHANGES after round 2 -> ESCALATE (step 7).
+6. **Approver.** All lenses PASS or N/A -> spawn the `approver` agent (opus, fresh context, never
+   the builder). Input: spec, final diff, the 4 verdict files, gate output, builder report.
+   Output: `APPROVE` or `ESCALATE` + reason, in `.orchestrator/reports/<task-id>-approver.md`.
+7. **Land or escalate.**
+   - **APPROVE -> the approver merges to main** (owner choice B, 2026-10-26): in a clean worktree
+     of the default branch, `git merge --no-ff loop/<task-id>`, re-run the spec's gates on the
+     merged result, then `git push` the default branch if a remote exists. Never force-push, never
+     `--no-verify`, never merge into a dirty checkout. Merge conflict, red gates after the merge,
+     or a push rejected by branch protection -> undo the local merge (`git merge --abort` or reset
+     that temp worktree only) and ESCALATE. Afterwards delete `loop/<task-id>` and `spoke-wt drop`
+     any leftover helper worktrees.
+   - **ESCALATE -> needs-human**: write `.orchestrator/reports/<task-id>-escalation.md` (top:
+     "What I need from you" — reply `approve` to land as-is, or say what to change; below: the
+     verdicts and evidence), then `jarvis-card file` it and
+     `jarvis-card ask approve "<task>: needs your call" --file <it>`. The owner's `approve` reply
+     lands it exactly like APPROVE. Owner changes = one more builder round + full panel.
+8. **Quota guard preempts the round cap.** GLM >= 90% (glm-usage.sh): pause GLM lenses and helpers
+   until reset (CLAUDE.md "GLM limit hit"); never reroute the whole panel to Claude. >= 70%: push
+   borderline glm-5.3 lens/helper work down to glm-4.7. Peak hours: run 4.7 work now, defer 5.3 work.
+
+This composes with the quota guard, spec contract, error catchers and session-contact rules below.
 
 ### Loop add-ons (2026-10-09): verify skill pass, thermo-nuclear pass, evidence
 - **QA hook: maintain + run verify skill.** After a wave's gates go green, fire one fresh spoke:
@@ -169,7 +199,7 @@ section (excluded from the hub-only tally). Expires automatically at test end.
     GLM spoke now; keep this agent only for specs that need session-connected MCP context),
   `code-reviewer` (sonnet — per-spoke diff review, ponytail+coding-standards),
   `security-reviewer` (opus — security lens, security-review+scan skills),
-  `design-reviewer` (sonnet — UI taste lens, taste-skill+redesign audit),
+  `design-reviewer` (sonnet — UI taste lens, taste-skill+redesign audit, Hallmark sloplint + Impeccable detect machine pass, design-refs/UX-LAWS.md),
   `verifier` (haiku — evidence-first gate runner, re-tiered 2026-10-12 for the 5.5 generation),
   `fixer` (sonnet — judgment-critical fixes, systematic-debugging+ponytail; try sonnet first on
     hard root-cause debugging, escalate to opus only after it fails the same criterion twice).
@@ -285,7 +315,10 @@ check `claude --help` / release notes, update this PROTOCOL and the launcher), r
 continuing.
 
 ## Spec file contract (write with the Write tool — never inline prompts in bash)
-**Who writes it (2026-08-18, user):** the hub writes a one-paragraph FRAMING (intent, ownership
+**Who writes it (2026-10-26, Task loop step 2 — wins over the 2026-08-18 paragraph below):**
+SMALL -> the hub writes it. LARGE -> the `spec-writer` agent (opus) drafts it from the hub's
+framing; the hub approves. GLM helper specs inside a LARGE build are written by the `builder`.
+**Older rule (2026-08-18, user), still used for helper-spoke specs when a builder delegates drafting:** the hub writes a one-paragraph FRAMING (intent, ownership
 boundary, done-condition) and fires a drafting spoke — `glm-mechanic` (4.7) when the framing
 already names files and criteria, `glm-implementer` (5.3) when the spec needs repo exploration to
 enumerate context paths or ownership. The draft lands at `.orchestrator/specs/<task-id>.md`; the
@@ -318,6 +351,11 @@ DB/Redis/Supabase creds into a spoke worktree. Taweed and Nuqra are excluded fro
 ```markdown
 # Task <task-id>: <title>
 ## Status: not_started
+## Size: SMALL|LARGE        <- Task loop step 1 (helper specs inside a LARGE build: omit)
+## Knowledge
+- <exact files from ~/.claude/orchestrator/KNOWLEDGE.md this task needs; read them first>
+## Review lenses
+- security: on | ux: on|N/A (<reason>) | ui: on|N/A (<reason>) | code: on
 ## Context
 <what the repo is, what exists, file paths to read first>
 ## Requirements — acceptance criteria (each independently checkable)
@@ -348,8 +386,12 @@ DB/Redis/Supabase creds into a spoke worktree. Taweed and Nuqra are excluded fro
    gap under it is FAILED, not passed on faith.
 ```
 
-### Review-spoke spec (2026-08-18 — required by loop step 3's glm-5.3 review path)
-A review spoke is a normal spoke fired with a read-only mission. Same contract, three changes:
+### Review-spoke spec (lens reviewers, Task loop step 4)
+A review spoke is a normal spoke fired with a read-only mission. For a panel lens, prepend the
+lens persona (`spokes/glm-review-<security|ux|ui|code>.md`, "Persona instructions" verbatim), name
+the report `.orchestrator/reports/<task-id>-<lens>.md`, and its first line is
+`VERDICT: PASS | CHANGES` (the persona says so; it overrides the ACCEPT/FIX/REJECT line below).
+Add the spec's Knowledge rows for that lens to Context. Otherwise same contract, three changes:
 ```markdown
 # Task <task-id>-review: review <task-id>
 ## Context

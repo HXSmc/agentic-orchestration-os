@@ -2,6 +2,9 @@
 description: Full autonomous execution from idea to validated working code — 6 phases (expand, plan, execute, QA, validate, cleanup). Options in $ARGUMENTS: pauseAfterPlanning, skipQa, maxQaCycles=N.
 ---
 
+> **Task loop (2026-10-26, BINDING):** this command runs PROTOCOL.md "Task loop" (triage, spec with `## Knowledge`, builder, 4-lens panel, max 2 change rounds, approver merges to main or escalates). Where a stage below conflicts with it, the Task loop wins.
+
+
 # Autopilot
 
 Input: $ARGUMENTS — the idea/goal, plus optional flags (`pauseAfterPlanning`, `skipQa`, `maxQaCycles=N` default 5).
