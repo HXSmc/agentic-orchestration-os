@@ -17,11 +17,15 @@ skills/plugins it should invoke), SAVE it here instead of leaving it inline in a
   production: copy drafts, ad variants, SEO page bodies, cold-email sequences, social posts;
   drafts against a brief from the Claude `marketing-strategist` agent, which owns
   positioning/pricing/KSA compliance judgment, and returns output to it for review).
+  Task loop review panel (2026-10-26): `glm-review-security` (5.3), `glm-review-ux` (4.7),
+  `glm-review-ui` (5.3, runs Hallmark sloplint), `glm-review-code` (4.7, 5.3 for unlisted files).
+  Used for SMALL tasks (Claude built); LARGE tasks use the Claude reviewer agents instead.
 - `agy/` — `researcher` (the one agy persona: cited external-fact research, /watch for video
   sources; /research remains the default wrapper for substantive research).
 - `<group>/<agent>.md` — one file per agent, grouped by workflow.
 - Claude-native role agents live in `~/.claude/agents/*.md` instead (architect, spec-writer,
-  code-reviewer, security-reviewer, design-reviewer, verifier, fixer — real Agent-tool
+  code-reviewer, security-reviewer, design-reviewer, ux-reviewer, builder, approver, verifier,
+  fixer — real Agent-tool
   subagents with model + skills frontmatter), not here.
 
 ## File format

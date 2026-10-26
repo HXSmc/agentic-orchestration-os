@@ -2,6 +2,9 @@
 description: Staged multi-agent pipeline — plan → prd → exec (N typed workers) → verify → fix loop (max 3). Usage: /team N[:type] "task"  (types: glm, glm-lite, claude, agy)
 ---
 
+> **Task loop (2026-10-26, BINDING):** this command runs PROTOCOL.md "Task loop" (triage, spec with `## Knowledge`, builder, 4-lens panel, max 2 change rounds, approver merges to main or escalates). Where a stage below conflicts with it, the Task loop wins.
+
+
 # Team
 
 Input: $ARGUMENTS  — parse as `N[:type] "task"`. Default N=3, type=glm. Types: `glm` (glm-5.3 spokes), `glm-lite` (glm-4.7 spokes), `claude` (Agent-tool subagents, Pro quota), `agy` (`agy --print --dangerously-skip-permissions "$(cat spec)"` workers). Cap N at 6 for glm types (quota), 20 otherwise.

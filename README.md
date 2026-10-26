@@ -124,6 +124,27 @@ or the safety and secrets rules.
 
 ---
 
+### The Task loop (2026-10-26)
+
+Every task except a plain question runs one loop (`orchestrator/PROTOCOL.md` → "Task loop"):
+
+```
+triage -> spec (## Knowledge) -> builder -> [security | ux | ui design | code] -> approver
+                                    ^            any CHANGES (max 2 rounds)  |   APPROVE -> merge to main
+                                    +----------------------------------------+   ESCALATE -> owner
+```
+
+| Size | Builder | Review panel |
+|---|---|---|
+| SMALL (files known, <=3, not security-sensitive) | the hub (Claude) | 4 fresh GLM spokes: `glm-review-security/ux/ui/code` |
+| LARGE (everything else) | Claude `builder` agent driving GLM helper spokes | Claude: `security-reviewer` (opus), `ux-reviewer`, `design-reviewer`, `code-reviewer` (sonnet) |
+
+The `approver` agent (opus, fresh) merges approved work to the default branch in a clean temp
+worktree, re-runs the gates and pushes; anything doubtful escalates to the owner. Every spec
+carries a `## Knowledge` section picked from `orchestrator/KNOWLEDGE.md`, so builders, helpers
+and reviewers read the same design, writing, legal and code rules. Update an existing machine
+with `./install.sh --force-agents`.
+
 ## What is in this repo
 
 | Repo path | Installs to | What it is |

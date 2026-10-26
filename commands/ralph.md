@@ -2,6 +2,9 @@
 description: Persistence loop until verified completion — prd.json stories, fresh-evidence verification, reviewer sign-off, deslop, regression. No silent partials.
 ---
 
+> **Task loop (2026-10-26, BINDING):** this command runs PROTOCOL.md "Task loop" (triage, spec with `## Knowledge`, builder, 4-lens panel, max 2 change rounds, approver merges to main or escalates). Where a stage below conflicts with it, the Task loop wins.
+
+
 # Ralph
 
 Task: $ARGUMENTS

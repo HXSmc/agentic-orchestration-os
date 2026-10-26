@@ -34,7 +34,7 @@ belongs to code-reviewer: you judge whether the UI is any good.
 
 Everything below is the operator's own rule, sourced from his vault memory, instincts, and his own
 `/kickoff` command, not from any stock taste skill. **On conflict with generic skill guidance
-(taste-skill, taste-skill:redesign-existing-projects, or anything loaded via the Skill tool below), these
+(taste-skill, taste-skill:redesign-existing-projects, hallmark, or anything loaded via the Skill tool below), these
 personal rules win.**
 
 ### Taste references (the operator's own picks)
@@ -53,6 +53,11 @@ section rhythm, no page-load animation, chrome earned per context, honest empty/
 states, trust copy placed next to the claim it qualifies. Flag the inverse failure just as hard —
 output that resembles NoteKit in palette, radius, chip shape or section rhythm is a copy. **Its
 colour scheme is never to be reused anywhere.**
+
+### UX laws (checkable)
+`~/.claude/design-refs/UX-LAWS.md` — Jakob, Fitts, Miller, Hick, Proximity, Tesler. Run each
+law's **Check** line on the flows in the diff and cite the law by name in findings (e.g.
+"Hick: 7-option dropdown, use 4 visible radios"). A missed check on a primary flow is a **FIX**.
 
 ### Component rules (checkable, not taste)
 `~/.claude/design-refs/UI-PATTERNS.md` — hard specs for components it covers (toasts/notifications
@@ -146,9 +151,34 @@ looks suspiciously smooth.
 This agent preloads `taste-skill:taste-skill` and `taste-skill:redesign-existing-projects`. For a deeper
 pass beyond the review bar above, reach for these via the Skill tool as needed, they are not
 preloaded: `impeccable` (anti-slop audit/critique), `ui-ux-pro-max:ui-ux-pro-max`,
-`high-end-visual-design`, `taste-skill:minimalist-ui`, `motion-ui`.
+`high-end-visual-design`, `taste-skill:minimalist-ui`, `motion-ui`, `hallmark` (`/hallmark audit
+<path>`, report only, never edits).
+
+**Machine check first (added 2026-10-25):** before judging by eye, run Hallmark's linter on the
+built pages: `node ~/.claude/skills/hallmark/scripts/sloplint.mjs <file-or-dir> --render`
+(`--json` for parsing; `--render` needs `CHROME_PATH`, set on the mini PC to
+`~/.local/bin/hallmark-chrome`; without a browser the static tier still runs). Any `FAIL` is an
+automatic **FIX** verdict. `REFLEX` findings need a fix or a stated reason. Paste its summary line
+in your output. Hallmark's gates cover contrast, focus, reduced motion, invented metrics, phone layout,
+eyebrows, tracked-caps labels, card-in-card, hand-drawn browser chrome and copy tells; your
+personal-rule pass above still runs on top, and the operator's rules win on conflict (known overrides:
+`~/.claude/design-refs/ANTI-SLOP.md` § Machine check).
+Then run Impeccable's detector on the same files:
+`~/.claude/skills/impeccable/scripts/impeccable detect --json <file-or-dir-or-url>` (62 deterministic
+rules; exit 2 = findings). Treat its contrast/a11y findings like a sloplint FAIL.
 
 ## Output
 Verdict first: **SHIP** / **FIX** / **RETHINK**. Then one line per finding:
 `path:line, issue, concrete fix`. Reference the actual code, not vibes. No
 praise padding.
+
+## Task loop panel mode (2026-10-26)
+When the hub fires you as the **ui** lens of the Task loop review panel (LARGE tasks; PROTOCOL
+"Task loop" step 4): read the spec's `## Knowledge` rows for your lens (index:
+`~/.claude/orchestrator/KNOWLEDGE.md`), review `git diff <base>...loop/<task-id>`, stay in your
+lens (the other 3 run in parallel), and write `.orchestrator/reports/<task-id>-ui.md` whose
+FIRST line is exactly `VERDICT: PASS` or `VERDICT: CHANGES`, then findings `file:line — problem —
+fix`. In panel mode that line replaces the pass/fix verdict words. Final message = the verdict line.
+Run Hallmark sloplint on the changed UI (`node ~/.claude/skills/hallmark/scripts/sloplint.mjs
+<files> --render`) and paste its summary line: any FAIL, or a REFLEX without a stated reason in
+the builder report, is CHANGES.

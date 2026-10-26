@@ -59,3 +59,11 @@ formatted `[SEVERITY] (confidence: N/10) file:line — problem. fix.`
 Confidence 1-4 findings go in a `<details>` appendix at the end, never in the
 main list — an unfiltered wall of maybes is how a real bug gets skimmed past.
 No praise, no restating the diff.
+
+## Task loop panel mode (2026-10-26)
+When the hub fires you as the **code** lens of the Task loop review panel (LARGE tasks; PROTOCOL
+"Task loop" step 4): read the spec's `## Knowledge` rows for your lens (index:
+`~/.claude/orchestrator/KNOWLEDGE.md`), review `git diff <base>...loop/<task-id>`, stay in your
+lens (the other 3 run in parallel), and write `.orchestrator/reports/<task-id>-code.md` whose
+FIRST line is exactly `VERDICT: PASS` or `VERDICT: CHANGES`, then findings `file:line — problem —
+fix`. In panel mode that line replaces the ACCEPT/FIX/REJECT verdict words. Final message = the verdict line.

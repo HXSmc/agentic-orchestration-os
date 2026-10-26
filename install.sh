@@ -6,6 +6,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# --force-agents: overwrite the Claude agents shipped here (old copies backed up first).
+# Use it when updating a machine to a new loop version (e.g. the 2026-10-26 Task loop).
+FORCE_AGENTS=0
+[ "${1:-}" = "--force-agents" ] && FORCE_AGENTS=1
+
 O=~/.claude/orchestrator
 mkdir -p ~/.local/bin "$O/hooks" "$O/state" "$O/agents" "$O/templates" \
   ~/.claude/commands ~/.claude/agents/refs ~/.claude/skills
@@ -16,7 +21,7 @@ for f in glm-code glm-vision spoke-wt; do
 done
 
 # --- orchestrator core
-cp orchestrator/PROTOCOL.md "$O/PROTOCOL.md"
+cp orchestrator/PROTOCOL.md orchestrator/KNOWLEDGE.md orchestrator/SPOKE-MODE.md "$O/"
 cp orchestrator/claims.py orchestrator/claims_test.py "$O/"
 cp orchestrator/hooks/loop-guard.mjs orchestrator/hooks/loop-owner-stamp.mjs "$O/hooks/"
 install -m 755 orchestrator/state/doctor.sh "$O/state/doctor.sh"
@@ -39,7 +44,13 @@ fi
 # --- Claude Code subagents + vendored skills: install only the ones you don't already have
 for f in claude-agents/*.md; do
   dst=~/.claude/agents/"$(basename "$f")"
-  [ -e "$dst" ] && echo "agent $(basename "$f") already present — left untouched" || cp "$f" "$dst"
+  if [ -e "$dst" ] && [ "$FORCE_AGENTS" = 1 ]; then
+    cp "$dst" "$dst.bak-$(date +%Y%m%d)" && cp "$f" "$dst" && echo "agent $(basename "$f") replaced (backup kept)"
+  elif [ -e "$dst" ]; then
+    echo "agent $(basename "$f") already present — left untouched (--force-agents to replace)"
+  else
+    cp "$f" "$dst"
+  fi
 done
 cp -n claude-agents/refs/*.md ~/.claude/agents/refs/ 2>/dev/null || true
 for d in skills/*/; do
